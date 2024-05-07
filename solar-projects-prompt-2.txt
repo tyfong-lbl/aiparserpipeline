@@ -1,0 +1,10 @@
+Analyze the text pasted below to determine how many solar projects are mentioned in the text, and the attributes of each solar project that is mentioned. 
+Based on your analysis, output a JSON list of dictionaries, with one dictionary for each solar project mentioned, wherein the dictionary attributes are selected from the following list:
+- name: Name of the project
+- gen: Amount of power generation in MW
+- storage: Amount of power storage in MWh
+- technology: Type of generation technology, e.g. “thin-film photovoltaic modules”
+- location: Location of the project - ideally including the city, county, state and country
+- project_description: A concise summary of the project
+Output only the JSON list according to these instructions. Do not output any other commentary or description.
+TEXT:
