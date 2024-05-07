@@ -23,17 +23,20 @@ client = openai.OpenAI(
     base_url="https://api.cyclogpt.lbl.gov"
 )
 
-response = client.chat.completions.create(
-    #model="openai/gpt-3.5-turbo",
-    model="lbl/cyclogpt:chat-v1",
-    temperature=0.0,
-    messages = [
-        {
-            "role": "user",
-            "content": prompt + fulltext
-        }
-    ]
-)
+try:
+    response = client.chat.completions.create(
+        #model="openai/gpt-3.5-turbo",
+        model="lbl/cyclogpt:chat-v1",
+        temperature=0.0,
+        messages = [
+            {
+                "role": "user",
+                "content": prompt + fulltext
+            }
+        ]
+    )
+except Exception as e:
+    print(f"An error occurred: {str(e)}")
 
 def strip_markdown(text):
     return re.sub(r'^```json(.*)```', r'\1', text, flags=re.DOTALL)
