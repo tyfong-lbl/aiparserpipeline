@@ -161,3 +161,4 @@ cython_debug/
 
 # Cache for Newspaper
 /newspaper_cache
+/memoized

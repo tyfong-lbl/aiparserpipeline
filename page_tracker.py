@@ -1,26 +1,35 @@
 import newspaper
+import newspaper.settings
 import numpy as np
 import os, sys
+import time
 import json
 import re
 
 from newspaper import Source
 from pathlib import Path
 
-pv_mag = Source('https://pv-magazine-usa.com/category/installations/commercial-industrial-pv/')
-pv_mag.build()
+# Set the path of the cache
+current_script_dir = Path(__file__).parent
+newspaper.settings.MEMO_DIR = current_script_dir
 
-# Get a list of articles
-article_urls = [* pv_mag.articles]
-# Get only 10 articles
-article_urls = article_urls[0:10]
+class AiParser:
 
-def mass_download(urls):
-    # Download a list of articles 
-    rv = np.random.normal(2,1)
-    for url in urls:
-        url.download
+    def __init__(self, publication_url) -> None:
+        self.publication = Source(publication_url)
+        self.publication.build() 
+
+
+
+    def get_articles_urls(self):
+        article_urls = [x for x in self.publication.articles]
+        return article_urls
+
+
+
+
     
 breakpoint()
 
+pv_mag = 'https://pv-magazine-usa.com/category/installations/commercial-industrial-pv/'
 
