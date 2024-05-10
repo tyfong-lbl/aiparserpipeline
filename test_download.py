@@ -23,6 +23,8 @@ articles = tool.get_articles_urls()
 data = tool.articles_parser(urls=articles,
                             max_limit=10)
 
+breakpoint()
+
 
 
 
