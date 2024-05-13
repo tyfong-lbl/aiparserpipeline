@@ -165,3 +165,7 @@ cython_debug/
 
 # macos
 .DS_Store
+
+# database files
+*.db
+*.csv

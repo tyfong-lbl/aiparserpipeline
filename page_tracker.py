@@ -66,7 +66,7 @@ class AiParser:
         return re.sub(r'^```json(.*)```', r'\1', text, flags=re.DOTALL)
 
 
-    def select_article_to_api(self, url:str, avg_pause=2):
+    def select_article_to_api(self, url:str, avg_pause=1):
         """
         Download, parse, and submit one article from a url
         """
@@ -104,15 +104,16 @@ class AiParser:
                         max_limit: int = None) -> list:
         if max_limit is None:
             max_limit = len(urls)
-        with tqdm(total=max_limit, 
-                  desc="Parsing articles",
-                  ) as pbar:
-            data = [self.select_article_to_api(x) for x in 
-                    (pbar.update(1) or url for url in urls[:max_limit])]
+        data = [result for result in (self.select_article_to_api(url) for url in tqdm(urls[:max_limit], desc="Parsing articles")) if result is not None]
+        #with tqdm(total=max_limit, 
+        #          desc="Parsing articles",
+        #          ) as pbar:
+            #data = [result for result in ((pbar.update(1) or 
+            #        self.select_article_to_api(x)) for x in urls[:max_limit]) 
+            #        if result is not None or True]
         return data
     
 
     
 
-pv_mag = 'https://pv-magazine-usa.com/category/installations/commercial-industrial-pv/'
 
