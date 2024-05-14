@@ -113,7 +113,19 @@ class AiParser:
             #        if result is not None or True]
         return data
     
+class RateLimitWrapper:
+    """
+    Used to test requests per minute and then limit 
+    """
+    def __init__(self, ai_parser, limit=None):
+        self.ai_parser = ai_parser
+        self.limit = limit
+        self.last_reset = time.time()
+        self.calls = 0
+        self.max_calls = 0
 
+    def articles_parser(self, urls, max_limit=None):
+        
     
 
 
