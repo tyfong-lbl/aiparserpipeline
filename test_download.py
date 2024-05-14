@@ -24,7 +24,6 @@ articles = tool.get_articles_urls()
 data = tool.articles_parser(urls=articles,
                             max_limit=15)
 
-breakpoint()
 
 # create a connection to the SQLite database
 conn = sqlite3.connect("my_database.db")
