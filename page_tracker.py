@@ -16,20 +16,19 @@ from tqdm import tqdm
 class AiParser:
 
     def __init__(self, 
-                 publication_url:str, 
                  api_key:str,
                  api_url:str,
                  model:str,
                  prompt:str,
-                 memoized=False
+                 memoized=False,
+                 publication_url=None
                  ) -> None:
         # Set the path of the 
         current_script_dir = Path(__file__).parent
         memo_dir = Path(current_script_dir, 'memoized')
         newspaper.settings.MEMO_DIR = memo_dir
-        #self.publication = Source(publication_url)
-        #self.publication.build() 
-        self.publication = news.build(url=publication_url,
+        if publication_url: 
+            self.publication = news.build(url=publication_url,
                                       memoize_articles=memoized)
         self.model = model
         self.prompt_path = prompt
@@ -47,7 +46,7 @@ class AiParser:
         article_urls = [article.url for article in self.publication.articles]
         return article_urls
     
-    
+    @staticmethod 
     def get_api_response(self,fulltext:str):
         response = self.client.chat.completions.create(
             model=self.model,
@@ -62,10 +61,12 @@ class AiParser:
         return response 
    
 
+    @staticmethod
     def strip_markdown(self, text):
         return re.sub(r'^```json(.*)```', r'\1', text, flags=re.DOTALL)
 
 
+    @staticmethod
     def select_article_to_api(self, url:str, avg_pause=1):
         """
         Download, parse, and submit one article from a url
@@ -99,18 +100,13 @@ class AiParser:
         return tagged_data
 
     
+    @staticmethod
     def articles_parser(self,
                         urls: list,
                         max_limit: int = None) -> list:
         if max_limit is None:
             max_limit = len(urls)
         data = [result for result in (self.select_article_to_api(url) for url in tqdm(urls[:max_limit], desc="Parsing articles")) if result is not None]
-        #with tqdm(total=max_limit, 
-        #          desc="Parsing articles",
-        #          ) as pbar:
-            #data = [result for result in ((pbar.update(1) or 
-            #        self.select_article_to_api(x)) for x in urls[:max_limit]) 
-            #        if result is not None or True]
         return data
     
 class RateLimitWrapper:
@@ -123,9 +119,3 @@ class RateLimitWrapper:
         self.last_reset = time.time()
         self.calls = 0
         self.max_calls = 0
-
-    def articles_parser(self, urls, max_limit=None):
-        
-    
-
-

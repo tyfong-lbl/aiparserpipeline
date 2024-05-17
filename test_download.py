@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 pv_mag = 'https://pv-magazine-usa.com/category/installations/commercial-industrial-pv/'
-with open('solar-projects-prompt-2.txt', 'r') as file:
+with open('test_prompts/solar-projects-prompt-2.txt', 'r') as file:
     prompt = file.read()
 
 api_key = os.environ.get('CYCLOGPT_API_KEY')
