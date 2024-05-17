@@ -165,6 +165,7 @@ cython_debug/
 
 # macos
 .DS_Store
+.swp
 
 # database files
 *.db
