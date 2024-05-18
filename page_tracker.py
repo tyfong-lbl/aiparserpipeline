@@ -3,6 +3,7 @@ import openai
 import newspaper as news
 import numpy as np
 import os, sys
+import pandas as pd
 import time
 import json
 import re
@@ -119,3 +120,38 @@ class RateLimitWrapper:
         self.last_reset = time.time()
         self.calls = 0
         self.max_calls = 0
+
+
+class ModelValidator:
+    def __init__(self,
+                 number_of_queries: int,
+                 prompt_dir_path,
+                 prompt_filename_base: str,
+                 api_key: str,
+                 model: str,
+                 project_name:str,
+                 url_df: pd.df ,
+                 parser=AiParser,
+
+                 ) -> None:
+        self.number_of_queries = number_of_queries
+        self.prompt_file_base = prompt_filename_base
+        self.api_key = api_key
+        self.model = model
+        self.parser = parser
+        self.prompt_dir = prompt_dir_path
+
+
+    def get_all_prompts(self)-> dict:
+        """Get prompts and output into an array"""
+        prompt_nums = range(1,self.number_of_queries+1)
+        prompt_filenames = [Path(self.prompt_dir,f'{self.prompt_file_base}{x}') 
+                            for x in prompt_nums ]
+        return prompts
+    
+
+    def get_responses_for_url(self)-> dict:
+        """
+        For a particular URL, get all the responses to prompts
+        """
+
