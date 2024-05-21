@@ -1,0 +1,7 @@
+Analyze the text pasted below to determine if the solar projects called ${PROJECT} is mentioned in the text, and if so, the attributes of the ${PROJECT} project that is mentioned.  Based on your analysis, output a JSON dictionary, wherein the dictionary attributes are selected from the following list:  
+- cost: A summary of costs to build the project with detail on the component     costs, if available
+- cost_yr: The date or year that the cost was reported
+- gen_dc: Nameplate power generation capacity in MW-DC
+- gen_ac: Nameplate power generation capacity in MW-AC
+Output only the JSON dictionary according to these instructions. Do not output any other commentary or description.
+TEXT:

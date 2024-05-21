@@ -171,4 +171,3 @@ cython_debug/
 *.db
 *.csv
 /groundtruth
-/test_prompts

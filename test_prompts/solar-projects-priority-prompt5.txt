@@ -1,0 +1,8 @@
+Analyze the text pasted below to determine if the solar projects called ${PROJECT} is mentioned in the text, and if so, the attributes of the ${PROJECT} project that is mentioned.  Based on your analysis, output a JSON dictionary, wherein the dictionary attributes are selected from the following list:  
+- tracking: Does this plant utilize trackers to adjust the angle to follow the   sun? If yes, output Y. If no (e.g., it is "fixed tilt"), output N.
+- storage: Does this plant include energy or battery storage? If yes (e.g., the  project is a "hybrid"), output Y. If no, output N.
+- storage_tech: Type of storage technology, e.g., "lithium-ion battery" or "battery"
+- storage_config: Coupling configuration between the storage and solar           components (e.g., "AC-coupled" or "DC-coupled")
+- project_description: A concise summary of the project
+Output only the JSON dictionary according to these instructions. Do not output any other commentary or description. If there is not enough information available for an attribute, output null for that attribute.
+TEXT:

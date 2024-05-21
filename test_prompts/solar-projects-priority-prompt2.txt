@@ -1,0 +1,7 @@
+Analyze the text pasted below to determine if the solar projects called ${PROJECT} is mentioned in the text, and if so, the attributes of the ${PROJECT} project that is mentioned.  Based on your analysis, output a JSON dictionary, wherein the dictionary attributes are selected from the following list:  
+- location: Location of the project, including as available, city, county, state and country
+- developer: Name of the company or organization that initially developed the project
+- offtake_desc: A concise summary of how the energy generated from the project will be sold
+- epc: Name of the company that handled the project engineering, procurement, and construction 
+Output only the JSON dictionary according to these instructions. Do not output any other commentary or description.
+TEXT:
