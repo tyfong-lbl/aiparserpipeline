@@ -216,6 +216,14 @@ class ModelValidator:
     def consolidate_responses(self)->pd.df:
         """Put together all responses for one project name"""
         responses = self.get_all_url_responses()
+        all_data = [
+            {**project, "project_name": self.project_name}
+            for response_list in responses for response in response_list if response
+            for projects in response.values() for project in projects
+        ]
+
+        final_df = pd.DataFrame(all_data) if all_data else pd.DataFrame()
+        return final_df
         # Make a pandas dataframe that has as the project name as 
         # a column with the rest of the column headers made up of the json keys
         return final_df
