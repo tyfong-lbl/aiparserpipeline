@@ -19,7 +19,7 @@ variables = {
 }
 template = Template(content)
 
-modified_query = template.substitute(variables)
+first_query = template.substitute(variables)
 
 # Get ground truth
 gt_file_path = os.environ.get('ENERGY_GROUNDTRUTH')
@@ -41,6 +41,16 @@ def extract_urls(text):
 urls_list = [url for urls in urls_column.apply(extract_urls).dropna() for url in urls]
 breakpoint()
 
+# Get a dict of the project name with urls
+first_query_results= {project_name:None}
+
+# Get path of the first file 
+# For each URL I want to ask it multiple queries and get multiple characteristics 
+FirstQuery = AiParser(api_key=api_key,
+                      api_url=api_url,
+                      model=model
+                      )
+# For each URl run through the function multiple times and each time do a different 
 
 
 
