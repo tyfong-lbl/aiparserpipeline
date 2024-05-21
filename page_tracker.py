@@ -137,7 +137,7 @@ class ModelValidator:
                  api_url: str, 
                  model: str,
                  project_name:str,
-                 url_df: pd.df ,
+                 url_df: pd.DataFrame,
                  parser=AiParser,
 
                  ) -> None:
@@ -213,7 +213,7 @@ class ModelValidator:
         return responses 
 
 
-    def consolidate_responses(self)->pd.df:
+    def consolidate_responses(self)->pd.DataFrame:
         """Put together all responses for one project name"""
         responses = self.get_all_url_responses()
         all_data = [
@@ -223,7 +223,4 @@ class ModelValidator:
         ]
 
         final_df = pd.DataFrame(all_data) if all_data else pd.DataFrame()
-        return final_df
-        # Make a pandas dataframe that has as the project name as 
-        # a column with the rest of the column headers made up of the json keys
         return final_df
