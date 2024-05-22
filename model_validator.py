@@ -6,6 +6,8 @@ from page_tracker import ModelValidator
 from pathlib import Path
 from string import Template 
 
+
+# Note that you must be on the lab VPN for this to work. 
 api_key = os.environ.get('CYCLOGPT_API_KEY')
 api_url = "https://api.cyclogpt.lbl.gov"
 model = 'lbl/cyclogpt:chat-v1'
@@ -27,7 +29,7 @@ prompt_directory = Path(current_directory,'test_prompts')
 
 model_validator = ModelValidator(number_of_queries=5,
                                  prompt_dir_path=prompt_directory,
-                                 prompt_filename_base='solar-proejcts-priority-prompt',
+                                 prompt_filename_base='solar-projects-priority-prompt',
                                  api_key=api_key,
                                  api_url=api_url,
                                  model=model,

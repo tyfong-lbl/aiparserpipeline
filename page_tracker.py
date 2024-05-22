@@ -48,9 +48,9 @@ class AiParser:
         # What are these objects? 
         article_urls = [article.url for article in self.publication.articles]
         return article_urls
-    
-    @staticmethod 
-    def get_api_response(self,fulltext:str):
+
+
+    def get_api_response(self, fulltext:str):
         response = self.client.chat.completions.create(
             model=self.model,
             temperature=0.0,
@@ -69,7 +69,6 @@ class AiParser:
         return re.sub(r'^```json(.*)```', r'\1', text, flags=re.DOTALL)
 
 
-    @staticmethod
     def select_article_to_api(self, url:str, include_url:True, avg_pause=1,):
         """
         Download, parse, and submit one article from a url
@@ -77,7 +76,7 @@ class AiParser:
         # Download an article
         try:
             a = newspaper.Article(url)
-        # Catch exceptions when there is a boolean in the urls
+        # Catch exceptions when there is a boolean in the urls-- maybe need to be more specific?
         except AttributeError:
             return
         a.download()
@@ -85,7 +84,7 @@ class AiParser:
         a.parse()
         fulltext = f"{a.title}.\n\n{a.text}"
         # Run the text through the AI api, return formated text 
-        response = self.get_api_response(fulltext)
+        response = self.get_api_response(fulltext=fulltext)
         stripped = self.strip_markdown(response.choices[0].message.content)
         # Error handling when the article does not mention solar projects
         try:
@@ -173,7 +172,7 @@ class ModelValidator:
     def get_all_prompts(self)-> dict:
         """Get prompts and output into an array"""
         prompt_nums = range(1,self.number_of_queries+1)
-        prompt_filenames = [Path(self.prompt_dir,f'{self.prompt_file_base}{x}') 
+        prompt_filenames = [Path(self.prompt_dir,f'{self.prompt_file_base}{x}.txt') 
                             for x in prompt_nums ]
         prompts = self.read_files_concurrently(prompt_filenames)
         return prompts
@@ -192,14 +191,21 @@ class ModelValidator:
                                model=self.model,
                                prompt=prompt
                                )
-            article_data = ai_parser.select_article_to_api(url)
+            article_data = ai_parser.select_article_to_api(url=url, 
+                                                           include_url=False,
+                                                           avg_pause=1
+                                                           )
             responses.append(article_data)
         return responses 
     
     @staticmethod
     def extract_urls(text):
         url_pattern = re.compile(r'(https?://\S+)')
-        urls = url_pattern.findall(text)
+        try: 
+            urls = url_pattern.findall(text)
+        # Deal with NaN values 
+        except TypeError:
+            return None 
         return urls if urls else None
 
 
@@ -208,7 +214,7 @@ class ModelValidator:
         # for the column of urls, get an array of URLs
         urls = [url for url in self.url_df.apply(self.extract_urls).dropna()]
         # feed each url to the api
-        responses = [self.get_responses_for_url(url) for url
+        responses = [self.get_responses_for_url(url[0]) for url
                      in urls]
         return responses 
 
