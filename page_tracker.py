@@ -65,7 +65,7 @@ class AiParser:
    
 
     @staticmethod
-    def strip_markdown(self, text):
+    def strip_markdown(text):
         return re.sub(r'^```json(.*)```', r'\1', text, flags=re.DOTALL)
 
 
@@ -95,12 +95,12 @@ class AiParser:
         # Error handling when there is no article at the link
         try:
             if include_url:
-                tagged_data = {url:data[0]}
+                tagged_data = {url:data}
             else:
-                tagged_data = {data[0]}
+                tagged_data = data
         except IndexError:
             return
-        pause = np.random.normal(avg_pause, avg_pause/2)
+        pause = abs(np.random.normal(avg_pause, avg_pause/2))
         time.sleep(pause)
         return tagged_data
 
@@ -192,7 +192,7 @@ class ModelValidator:
                                prompt=prompt
                                )
             article_data = ai_parser.select_article_to_api(url=url, 
-                                                           include_url=False,
+                                                           include_url=True,
                                                            avg_pause=1
                                                            )
             responses.append(article_data)
@@ -221,12 +221,16 @@ class ModelValidator:
 
     def consolidate_responses(self)->pd.DataFrame:
         """Put together all responses for one project name"""
-        responses = self.get_all_url_responses()
-        all_data = [
-            {**project, "project_name": self.project_name}
-            for response_list in responses for response in response_list if response
-            for projects in response.values() for project in projects
-        ]
+        data = self.get_all_url_responses()
+        try:
+            flattened_data = [
+            {**details, 'URL': url}
+            for sublist in data
+            for item in sublist if item
+            for url, details in item.items()
+            ]
+        except TypeError:
+            breakpoint()
 
-        final_df = pd.DataFrame(all_data) if all_data else pd.DataFrame()
+        final_df = pd.DataFrame(flattened_data)
         return final_df
