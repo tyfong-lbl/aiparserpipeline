@@ -3,6 +3,7 @@ import openai
 import newspaper as news
 import numpy as np
 import concurrent.futures
+import logging
 import os, sys
 import pandas as pd
 import re
@@ -10,9 +11,16 @@ import time
 import json
 import re
 
-from newspaper import Article, Source
+
 from pathlib import Path
+from ratelimit import limits, sleep_and_retry
+from string import Template
 from tqdm import tqdm
+
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Set the path of the cache
 # Requires setting of API key 
@@ -23,6 +31,7 @@ class AiParser:
                  api_url:str,
                  model:str,
                  prompt:str,
+                 project_name:str,
                  memoized=False,
                  publication_url=None
                  ) -> None:
@@ -34,7 +43,8 @@ class AiParser:
             self.publication = news.build(url=publication_url,
                                       memoize_articles=memoized)
         self.model = model
-        self.prompt_path = prompt
+        self.prompt = prompt,
+        self.project_name = project_name
         # Get api key 
         self.api_key = api_key
         self.client = openai.OpenAI(
@@ -49,15 +59,20 @@ class AiParser:
         article_urls = [article.url for article in self.publication.articles]
         return article_urls
 
-
+    @sleep_and_retry
+    @limits(calls=10, period=60)
     def get_api_response(self, fulltext:str):
+        #breakpointe)
+        values = {"PROJECT":self.project_name}
+        template = Template(self.prompt[0])
+        prompt_for_submission = template.substitute(values)
         response = self.client.chat.completions.create(
             model=self.model,
             temperature=0.0,
             messages=[
                 {
                     "role":"user",
-                    "content": f"{self.prompt_path}{fulltext} "
+                    "content": f"{prompt_for_submission}{fulltext} "
                 }
             ]
         )
@@ -66,43 +81,62 @@ class AiParser:
 
     @staticmethod
     def strip_markdown(text):
-        return re.sub(r'^```json(.*)```', r'\1', text, flags=re.DOTALL)
+        json_pattern = re.search(r'{.*}', text, re.DOTALL)
+        json_str = json_pattern.group(0).strip() 
+        #stripped_markdown = re.sub(r'^```json(.*)```', r'\1', text, flags=re.DOTALL)
+        return json_str
 
-
-    def select_article_to_api(self, url:str, include_url:True, avg_pause=1,):
+    @sleep_and_retry
+    @limits(calls=5, period=60)
+    def select_article_to_api(self, url:str, include_url:True, avg_pause=0,):
         """
         Download, parse, and submit one article from a url
         """
         # Download an article
         try:
             a = newspaper.Article(url)
-        # Catch exceptions when there is a boolean in the urls-- maybe need to be more specific?
-        except AttributeError:
-            return
-        a.download()
-        # Parse the text 
-        a.parse()
+            a.download()
+            # Parse the text 
+            a.parse()
+        except AttributeError as e:
+            logger.error(f"AttributeError encountered: {e}")
+            return None
+        except newspaper.article.ArticleException as e:
+            logger.error(f"ArticleException encountered: {e}")
+            return None
+        except Exception as e: 
+            logger.error(f"Unexpected error: {e}")
+            
         fulltext = f"{a.title}.\n\n{a.text}"
-        # Run the text through the AI api, return formated text 
-        response = self.get_api_response(fulltext=fulltext)
-        stripped = self.strip_markdown(response.choices[0].message.content)
-        # Error handling when the article does not mention solar projects
+        #breakpoint()
         try:
+            # Run the text through the AI api, return formated text 
+            response = self.get_api_response(fulltext=fulltext)
+            stripped = self.strip_markdown(response.choices[0].message.content)
+            # Error handling when the article does not mention solar projects
             data = json.loads(stripped)
-        except json.decoder.JSONDecodeError:
-            # Should I have error logging here??
-            return
+        except json.decoder.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError encountered: {e}")
+            breakpoint()
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error during API response handling: {e}")
+            return None
         # Error handling when there is no article at the link
         try:
             if include_url:
                 tagged_data = {url:data}
             else:
                 tagged_data = data
-        except IndexError:
-            return
-        pause = abs(np.random.normal(avg_pause, avg_pause/2))
-        time.sleep(pause)
-        return tagged_data
+        except IndexError as e:
+            logger.error(f"IndexError encountered: {e}")
+            return None
+        if avg_pause > 0:
+            pause = abs(np.random.normal(avg_pause, avg_pause/2))
+            time.sleep(pause)
+            return tagged_data
+        else:
+            return tagged_data
 
     
     @staticmethod
@@ -189,7 +223,8 @@ class ModelValidator:
             ai_parser = AiParser(api_key=self.api_key,
                                api_url=self.api_url, 
                                model=self.model,
-                               prompt=prompt
+                               prompt=prompt,
+                               project_name=self.project_name,
                                )
             article_data = ai_parser.select_article_to_api(url=url, 
                                                            include_url=True,
@@ -214,8 +249,7 @@ class ModelValidator:
         # for the column of urls, get an array of URLs
         urls = [url for url in self.url_df.apply(self.extract_urls).dropna()]
         # feed each url to the api
-        responses = [self.get_responses_for_url(url[0]) for url
-                     in urls]
+        responses = [self.get_responses_for_url(url[0]) for url in tqdm(urls, desc="Getting responses for URLs")]
         return responses 
 
 

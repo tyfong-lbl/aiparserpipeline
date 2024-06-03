@@ -2,15 +2,16 @@ import os
 import pandas as pd
 import re
 
+from datetime import datetime
 from page_tracker import ModelValidator 
 from pathlib import Path
 from string import Template 
 
-
 # Note that you must be on the lab VPN for this to work. 
 api_key = os.environ.get('CYCLOGPT_API_KEY')
-api_url = "https://api.cyclogpt.lbl.gov"
-model = 'lbl/cyclogpt:chat-v1'
+api_url = "https://api.cborg.lbl.gov"
+
+model = 'lbl/llama-3'
 
 
 variables = { 
@@ -38,6 +39,37 @@ model_validator = ModelValidator(number_of_queries=5,
 
 df = model_validator.consolidate_responses()
 breakpoint()
+#def parse_list(lst):
+#    if isinstance(lst, list):
+#        seen = set()
+#        return [x for x in lst if x not in seen and not (seen.add(x) or str(x).lower() in ['nan', 'none', 'null'])]
+#    return lst 
+def parse_list(lst):
+    if isinstance(lst, list):
+        seen = set()
+        valid_values = []
+        for x in lst:
+            x_str = str(x).lower()  # Convert to string to handle hashable issue
+            if x_str not in seen and x_str not in ['nan', 'none', 'null']:
+                valid_values.append(x)
+                seen.add(x_str)
+        return valid_values
+    return lst
+
+grouped = df.groupby('URL').agg(list)
+parsed_grouped = grouped.apply(lambda col: col.apply(parse_list))
+
+# Write the df to a dated csv
+now = datetime.now()
+datetime_str = now.strftime('%Y-%m-%d-%H%M')
+# Maybe edit the output name to show the model name!
+# Edit the model name to remove the slash
+p = Path(model)
+stripped_path = p.relative_to("lbl")
+model_name = str(stripped_path)
+csv_name = f"test_readout_{model_name}_{datetime_str}.csv"
+df.to_csv(csv_name)
+
 
 
 
