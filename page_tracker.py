@@ -253,18 +253,47 @@ class ModelValidator:
         return responses 
 
 
+    def flatten_dict(self, input_dict)->list:
+        """Make url into just one k:v pair alongside others"""
+        # Extract the single URL and its associated data
+        url, attributes = next(iter(input_dict.items()))
+        # Flatten
+        flattened_dict = {k:v for k, v in attributes.items()}
+        flattened_dict['url'] = url
+        return flattened_dict
+    
+
+    def custom_agg(self, series):
+        non_null_values = series.dropna.unique()
+        return non_null_values if non_null_values else [None]
+
+            
+
+
     def consolidate_responses(self)->pd.DataFrame:
         """Put together all responses for one project name"""
         data = self.get_all_url_responses()
+        breakpoint()
         try:
-            flattened_data = [
-            {**details, 'URL': url}
-            for sublist in data
-            for item in sublist if item
-            for url, details in item.items()
-            ]
+            # data has a list of lists
+                # outermost list is each url 
+                    # 2nd level list is the queries for each url
+                        # 2d level is all dicts of dicts
+                        # outer dict key is the url
+                            # Inner dict has keys for all query cols
+            #rows = []
+            #for element in data:
+            #    for queries in element:
+            #        rows.append(self.flatten_dict(queries))
+            rows = [self.flatten_dict(queries) for element in data for queries in element]
         except TypeError:
             breakpoint()
 
-        final_df = pd.DataFrame(flattened_data)
+        breakpoint()
+        df = pd.DataFrame(rows)
+        df.name = self.project_name
+        aggregations = {col:self.custom_agg for col in df.columns 
+                        if col != 'url'}
+        final_df = df.groupby('url').agg(aggregations).reset_index()
         return final_df
+
