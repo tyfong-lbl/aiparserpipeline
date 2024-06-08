@@ -264,7 +264,7 @@ class ModelValidator:
     
 
     def custom_agg(self, series):
-        non_null_values = series.dropna.unique()
+        non_null_values = series.dropna().unique()
         return non_null_values if non_null_values else [None]
 
             
@@ -281,19 +281,37 @@ class ModelValidator:
                         # 2d level is all dicts of dicts
                         # outer dict key is the url
                             # Inner dict has keys for all query cols
-            #rows = []
-            #for element in data:
-            #    for queries in element:
-            #        rows.append(self.flatten_dict(queries))
             rows = [self.flatten_dict(queries) for element in data for queries in element]
         except TypeError:
             breakpoint()
 
-        breakpoint()
         df = pd.DataFrame(rows)
         df.name = self.project_name
-        aggregations = {col:self.custom_agg for col in df.columns 
-                        if col != 'url'}
-        final_df = df.groupby('url').agg(aggregations).reset_index()
+        df['url'] = df['url'].astype(str)
+         # Identify columns with lists
+        list_columns = df.applymap(lambda x: isinstance(x, list)).any()
+        groupable_columns = [col for col in df.columns if not list_columns[col]]
+        list_columns = [col for col in df.columns if list_columns[col]]
+        breakpoint()
+        try:
+            # Define aggregations for columns that do not contain lists
+            aggregations = {col: self.custom_agg for col in groupable_columns if col != 'url'}
+        
+            # Group by 'url' and aggregate using the custom function
+            grouped_df = df.groupby('url').agg(aggregations).reset_index()
+        
+            # Handle columns with lists separately
+            for col in list_columns:
+                grouped_df[col] = df.groupby('url')[col].apply(lambda x: x.tolist()).reset_index(drop=True)
+        
+            # Combine grouped data
+            final_df = grouped_df
+            
+            #aggregations = {col:self.custom_agg for col in df.columns 
+            #                if col != 'url'}
+            #final_df = df.groupby('url').agg(aggregations).reset_index()
+        except TypeError as e:
+            print(f"error is {e}")
+            breakpoint()
         return final_df
 
