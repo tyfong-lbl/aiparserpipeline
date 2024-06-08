@@ -4,9 +4,9 @@ import newspaper as news
 import numpy as np
 import concurrent.futures
 import logging
-import os, sys
 import pandas as pd
 import re
+import sqlite3
 import time
 import json
 import re
@@ -262,18 +262,16 @@ class ModelValidator:
         flattened_dict['url'] = url
         return flattened_dict
     
-
-    def custom_agg(self, series):
-        non_null_values = series.dropna().unique()
+    
+    @staticmethod
+    def custom_agg(series):
+        non_null_values = series.dropna().unique().tolist()
         return non_null_values if non_null_values else [None]
-
-            
 
 
     def consolidate_responses(self)->pd.DataFrame:
         """Put together all responses for one project name"""
         data = self.get_all_url_responses()
-        breakpoint()
         try:
             # data has a list of lists
                 # outermost list is each url 
@@ -288,30 +286,30 @@ class ModelValidator:
         df = pd.DataFrame(rows)
         df.name = self.project_name
         df['url'] = df['url'].astype(str)
-         # Identify columns with lists
-        list_columns = df.applymap(lambda x: isinstance(x, list)).any()
-        groupable_columns = [col for col in df.columns if not list_columns[col]]
-        list_columns = [col for col in df.columns if list_columns[col]]
         breakpoint()
         try:
-            # Define aggregations for columns that do not contain lists
-            aggregations = {col: self.custom_agg for col in groupable_columns if col != 'url'}
-        
-            # Group by 'url' and aggregate using the custom function
-            grouped_df = df.groupby('url').agg(aggregations).reset_index()
-        
-            # Handle columns with lists separately
-            for col in list_columns:
-                grouped_df[col] = df.groupby('url')[col].apply(lambda x: x.tolist()).reset_index(drop=True)
-        
-            # Combine grouped data
-            final_df = grouped_df
-            
-            #aggregations = {col:self.custom_agg for col in df.columns 
-            #                if col != 'url'}
-            #final_df = df.groupby('url').agg(aggregations).reset_index()
+            conn = sqlite3.connect(':memory:')
+            df.to_sql('responses', conn, index=False, if_exists='replace')
+
+            query = """
+            SELECT url,
+                   GROUP_CONCAT(owner) as owner,
+                   GROUP_CONCAT(offtaker) as offtaker,
+                   GROUP_CONCAT(storage_energy) as storage_energy,
+                   GROUP_CONCAT(storage_power) as storage_power
+            FROM responses
+            GROUP BY url
+            """
+
+            grouped_df = pd.read_sql_query(query, conn)
+
+            for col in ['owner', 'offtaker', 'storage_energy', 'storage_power']:
+                grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
+
+            conn.close()
         except TypeError as e:
             print(f"error is {e}")
             breakpoint()
-        return final_df
+
+        return grouped_df 
 
