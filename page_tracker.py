@@ -59,8 +59,8 @@ class AiParser:
         article_urls = [article.url for article in self.publication.articles]
         return article_urls
 
-    @sleep_and_retry
-    @limits(calls=10, period=60)
+    #@sleep_and_retry
+    #@limits(calls=10, period=60)
     def get_api_response(self, fulltext:str):
         #breakpointe)
         values = {"PROJECT":self.project_name}
@@ -86,8 +86,8 @@ class AiParser:
         #stripped_markdown = re.sub(r'^```json(.*)```', r'\1', text, flags=re.DOTALL)
         return json_str
 
-    @sleep_and_retry
-    @limits(calls=5, period=60)
+    #@sleep_and_retry
+    #@limits(calls=5, period=60)
     def select_article_to_api(self, url:str, include_url:True, avg_pause=0,):
         """
         Download, parse, and submit one article from a url
@@ -269,6 +269,12 @@ class ModelValidator:
         return non_null_values if non_null_values else [None]
 
 
+    def log_value_types(self, df):
+        for col in df.columns:
+            for i, val in enumerate(df[col]):
+                print(f"Row {i}, Column '{col}': Value '{val}', Type {type(val)}")
+
+
     def consolidate_responses(self)->pd.DataFrame:
         """Put together all responses for one project name"""
         data = self.get_all_url_responses()
@@ -286,11 +292,24 @@ class ModelValidator:
         df = pd.DataFrame(rows)
         df.name = self.project_name
         df['url'] = df['url'].astype(str)
-        breakpoint()
+        
+
+        def clean_value(value):
+            if isinstance(value, list):
+                return ','.join(map(str, value))
+            elif pd.isna(value):
+                return None
+            else:
+                return value
+
+        df = df.map(clean_value)
+        print(df.dtypes)
+        self.log_value_types(df)
         try:
             conn = sqlite3.connect(':memory:')
             df.to_sql('responses', conn, index=False, if_exists='replace')
-
+            # Need to add GROUP_CONCAT for all the other columns
+            # Maybe do it automatically  
             query = """
             SELECT url,
                    GROUP_CONCAT(owner) as owner,
