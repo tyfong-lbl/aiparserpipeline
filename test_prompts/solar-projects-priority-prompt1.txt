@@ -1,4 +1,4 @@
-Analyze the text pasted below to determine if the solar projects called ${PROJECT} is mentioned in the text, and if so, the attributes of the ${PROJECT} project that is mentioned.  Based on your analysis, output a JSON dictionary, wherein the dictionary attributes are selected from the following list:  
+Analyze the text pasted below to determine if the solar projects called ${PROJECT} is mentioned in the text, and if so, the attributes of the ${PROJECT} project that are mentioned.  Based on your analysis, output a JSON dictionary, wherein the dictionary attributes are selected from the following list:  
 - owner: The name of the company or organization that owns the project
 - offtaker: Name of the company or utility purchasing power from the project, for example, through a power purchase agreement. A power purchase agreement is often abbreviated as PPA. There may be multiple offtakers
 - storage_power: Power capacity of energy storage in MW
