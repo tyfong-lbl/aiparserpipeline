@@ -1,6 +1,5 @@
-import newspaper
+import asyncio 
 import openai
-import newspaper as news
 import numpy as np
 import concurrent.futures
 import logging
@@ -9,141 +8,136 @@ import re
 import sqlite3
 import time
 import json
-import re
-
-
 from pathlib import Path
-from ratelimit import limits, sleep_and_retry
 from string import Template
 from tqdm import tqdm
-
+from playwright.async_api import async_playwright 
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Set the path of the cache
-# Requires setting of API key 
 class AiParser:
-
     def __init__(self, 
                  api_key:str,
                  api_url:str,
                  model:str,
                  prompt:str,
                  project_name:str,
-                 memoized=False,
                  publication_url=None
                  ) -> None:
-        # Set the path of the 
-        current_script_dir = Path(__file__).parent
-        memo_dir = Path(current_script_dir, 'memoized')
-        newspaper.settings.MEMO_DIR = memo_dir
-        if publication_url: 
-            self.publication = news.build(url=publication_url,
-                                      memoize_articles=memoized)
         self.model = model
         self.prompt = prompt,
         self.project_name = project_name
-        # Get api key 
         self.api_key = api_key
         self.client = openai.OpenAI(
             api_key=self.api_key,
             base_url=api_url
         )
+        self.publication_url = publication_url
+        self.playwright = None 
+        self.browser = None 
+
+    async def initialize(self):
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch()
+
+    async def close(self):
+        if self.browser:
+            await self.browser.close()
+        if self.playwright:
+            await self.playwright.stop()
+      
+    def __del__(self):
+        self.browser.close()
+        self.playwright.stop()
+
+    async def get_articles_urls(self) -> list:
+        if not self.publication_url:
+            return []
         
-
-    def get_articles_urls(self) -> list:
-        """Get all the articles"""
-        # What are these objects? 
-        article_urls = [article.url for article in self.publication.articles]
+        page = await self.browser.new_page()
+        await page.goto(self.publication_url)
+        article_urls = await page.evaluate("""
+            () => Array.from(document.querySelectorAll('a')).map(a => a.href)
+                .filter(href => href.includes('/article/') || href.includes('/news/'))
+        """)
+        await page.close()
         return article_urls
-
-    #@sleep_and_retry
-    #@limits(calls=10, period=60)
+    
     def get_api_response(self, fulltext:str):
-        #breakpointe)
-        values = {"PROJECT":self.project_name}
+        breakpoint()
+        values = {"PROJECT": self.project_name}
         template = Template(self.prompt[0])
         prompt_for_submission = template.substitute(values)
-        response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0.0,
-            messages=[
-                {
-                    "role":"user",
-                    "content": f"{prompt_for_submission}{fulltext} "
-                }
-            ]
-        )
-        return response 
-   
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                temperature=0.0,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"{prompt_for_submission}{fulltext} "
+                    }
+                ]
+            )
+            return response.choices[0].message.content if response.choices else None
+        except Exception as e:
+            logger.error(f"Error in API call: {e}")
+            return None
+
 
     @staticmethod
     def strip_markdown(text):
+        if text is None:
+            return "{}"  # Return empty JSON object if text is None
         json_pattern = re.search(r'{.*}', text, re.DOTALL)
-        json_str = json_pattern.group(0).strip() 
-        #stripped_markdown = re.sub(r'^```json(.*)```', r'\1', text, flags=re.DOTALL)
-        return json_str
+        if json_pattern:
+            return json_pattern.group(0).strip()
+        else:
+            logger.warning(f"No JSON-like content found in the response: {text[:100]}...")  # Log first 100 chars
+            return "{}"  # Return empty JSON object if no match found
 
-    #@sleep_and_retry
-    #@limits(calls=5, period=60)
-    def select_article_to_api(self, url:str, include_url:True, avg_pause=0,):
-        """
-        Download, parse, and submit one article from a url
-        """
-        # Download an article
+
+    async def select_article_to_api(self, url:str, include_url:bool=True, avg_pause=0):
+        breakpoint()
         try:
-            a = newspaper.Article(url)
-            a.download()
-            # Parse the text 
-            a.parse()
-        except AttributeError as e:
-            logger.error(f"AttributeError encountered: {e}")
+            page = await self.browser.new_page()
+            await page.goto(url)
+            title = await page.title()
+            text = await page.evaluate('() => document.body.innerText')
+            await page.close()
+        except Exception as e:
+            logger.error(f"Error fetching article: {e}")
             return None
-        except newspaper.article.ArticleException as e:
-            logger.error(f"ArticleException encountered: {e}")
-            return None
-        except Exception as e: 
-            logger.error(f"Unexpected error: {e}")
-            
-        fulltext = f"{a.title}.\n\n{a.text}"
-        #breakpoint()
+
+        fulltext = f"{title}.\n\n{text}"
+    
         try:
-            # Run the text through the AI api, return formated text 
-            response = self.get_api_response(fulltext=fulltext)
-            stripped = self.strip_markdown(response.choices[0].message.content)
-            # Error handling when the article does not mention solar projects
+            response_content = self.get_api_response(fulltext=fulltext)
+            if response_content is None:
+                logger.error("No response content from API")
+                return None
+            stripped = self.strip_markdown(response_content)
             data = json.loads(stripped)
-        except json.decoder.JSONDecodeError as e:
+        except json.JSONDecodeError as e:
             logger.error(f"JSONDecodeError encountered: {e}")
-            breakpoint()
             return None
         except Exception as e:
             logger.error(f"Unexpected error during API response handling: {e}")
             return None
-        # Error handling when there is no article at the link
-        try:
-            if include_url:
-                tagged_data = {url:data}
-            else:
-                tagged_data = data
-        except IndexError as e:
-            logger.error(f"IndexError encountered: {e}")
-            return None
+
+        tagged_data = {url: data} if include_url else data
+
         if avg_pause > 0:
             pause = abs(np.random.normal(avg_pause, avg_pause/2))
-            time.sleep(pause)
-            return tagged_data
-        else:
-            return tagged_data
+            await asyncio.sleep(pause)
 
-    
+        return tagged_data
+
+
     @staticmethod
-    def articles_parser(self,
-                        urls: list,
-                        include_url=True,
-                        max_limit: int = None) -> list:
+    def articles_parser(self, urls: list, include_url=True, max_limit: int = None) -> list:
         if max_limit is None:
             max_limit = len(urls)
         data = [result for result in (self.select_article_to_api(url,include_url) for url in tqdm(urls[:max_limit], desc="Parsing articles")) if result is not None]
@@ -212,26 +206,28 @@ class ModelValidator:
         return prompts
     
 
-    def get_responses_for_url(self,url)->list:
+    async def get_responses_for_url(self,url)->list:
         """
         For a particular URL, get all the responses to prompts
         """
         prompts = self.get_all_prompts()
         responses = []
-        # Hit the url with each prompt in turn
+        ai_parser = AiParser(api_key=self.api_key,
+                             api_url=self.api_url, 
+                             model=self.model,
+                             prompt=prompts[0],
+                             project_name=self.project_name)
+        await ai_parser.initialize()
+        
         for prompt in prompts:
-            ai_parser = AiParser(api_key=self.api_key,
-                               api_url=self.api_url, 
-                               model=self.model,
-                               prompt=prompt,
-                               project_name=self.project_name,
-                               )
-            article_data = ai_parser.select_article_to_api(url=url, 
-                                                           include_url=True,
-                                                           avg_pause=1
-                                                           )
+            ai_parser.prompt = prompt
+            article_data = await ai_parser.select_article_to_api(url=url, 
+                                                                 include_url=True,
+                                                                 avg_pause=1)
             responses.append(article_data)
-        return responses 
+        
+        await ai_parser.close()
+        return responses
     
     @staticmethod
     def extract_urls(text):
@@ -244,13 +240,10 @@ class ModelValidator:
         return urls if urls else None
 
 
-    def get_all_url_responses(self)->dict:
-        """Get all responses for urls for project"""
-        # for the column of urls, get an array of URLs
+    async def get_all_url_responses(self) -> dict:
         urls = [url for url in self.url_df.apply(self.extract_urls).dropna()]
-        # feed each url to the api
-        responses = [self.get_responses_for_url(url[0]) for url in tqdm(urls, desc="Getting responses for URLs")]
-        return responses 
+        responses = [await self.get_responses_for_url(url[0]) for url in tqdm(urls, desc="Getting responses for URLs")]
+        return responses
 
 
     def flatten_dict(self, input_dict)->list:
@@ -275,9 +268,8 @@ class ModelValidator:
                 print(f"Row {i}, Column '{col}': Value '{val}', Type {type(val)}")
 
 
-    def consolidate_responses(self)->pd.DataFrame:
-        """Put together all responses for one project name"""
-        data = self.get_all_url_responses()
+    async def consolidate_responses(self) -> pd.DataFrame:
+        data = await self.get_all_url_responses()
         try:
             # data has a list of lists
                 # outermost list is each url 

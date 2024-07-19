@@ -1,3 +1,4 @@
+import asyncio 
 import os
 import pandas as pd
 import re
@@ -28,7 +29,8 @@ project_name = 'Slate Hybrid'
 current_directory = Path(__file__).resolve().parent
 prompt_directory = Path(current_directory,'test_prompts')
 
-model_validator = ModelValidator(number_of_queries=5,
+async def main():
+    model_validator = ModelValidator(number_of_queries=5,
                                  prompt_dir_path=prompt_directory,
                                  prompt_filename_base='solar-projects-priority-prompt',
                                  api_key=api_key,
@@ -37,27 +39,20 @@ model_validator = ModelValidator(number_of_queries=5,
                                  project_name=project_name,
                                  url_df=url_df)
 
-df = model_validator.consolidate_responses()
-#breakpoint()
-#def parse_list(lst):
-#    if isinstance(lst, list):
-#        seen = set()
-#        return [x for x in lst if x not in seen and not (seen.add(x) or str(x).lower() in ['nan', 'none', 'null'])]
-#    return lst 
-#
-#grouped = df.groupby('URL').agg(list)
-#parsed_grouped = grouped.apply(lambda col: col.apply(parse_list))
-#
-## Write the df to a dated csv
-now = datetime.now()
-datetime_str = now.strftime('%Y-%m-%d-%H%M')
-# Maybe edit the output name to show the model name!
-# Edit the model name to remove the slash
-p = Path(model)
-stripped_path = p.relative_to("lbl")
-model_name = str(stripped_path)
-csv_name = f"test_readout_{model_name}_{datetime_str}.csv"
-df.to_csv(csv_name)
+    df = await model_validator.consolidate_responses()
+    now = datetime.now()
+    datetime_str = now.strftime('%Y-%m-%d-%H%M')
+    # Maybe edit the output name to show the model name!
+    # Edit the model name to remove the slash
+    p = Path(model)
+    stripped_path = p.relative_to("lbl")
+    model_name = str(stripped_path)
+    csv_name = f"test_readout_{model_name}_{datetime_str}.csv"
+    df.to_csv(csv_name)
+    print('Job complete')
+
+if __name__=="__main__":
+    asyncio.run(main())
 
 
 
