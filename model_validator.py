@@ -49,7 +49,7 @@ async def main():
     model_name = str(stripped_path)
     csv_name = f"test_readout_{model_name}_{datetime_str}.csv"
     df.to_csv(csv_name)
-    print('Job complete')
+
 
 if __name__=="__main__":
     asyncio.run(main())

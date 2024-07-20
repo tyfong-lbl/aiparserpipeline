@@ -48,10 +48,6 @@ class AiParser:
         if self.playwright:
             await self.playwright.stop()
       
-    def __del__(self):
-        self.browser.close()
-        self.playwright.stop()
-
     async def get_articles_urls(self) -> list:
         if not self.publication_url:
             return []
@@ -66,9 +62,8 @@ class AiParser:
         return article_urls
     
     def get_api_response(self, fulltext:str):
-        breakpoint()
         values = {"PROJECT": self.project_name}
-        template = Template(self.prompt[0])
+        template = Template(self.prompt)
         prompt_for_submission = template.substitute(values)
         try:
             response = self.client.chat.completions.create(
@@ -100,7 +95,6 @@ class AiParser:
 
 
     async def select_article_to_api(self, url:str, include_url:bool=True, avg_pause=0):
-        breakpoint()
         try:
             page = await self.browser.new_page()
             await page.goto(url)
@@ -142,6 +136,12 @@ class AiParser:
             max_limit = len(urls)
         data = [result for result in (self.select_article_to_api(url,include_url) for url in tqdm(urls[:max_limit], desc="Parsing articles")) if result is not None]
         return data
+    
+    async def cleanup(self):
+        if self.browser:
+            await self.browser.close()
+        if self.playwright:
+            await self.playwright.stop()
     
 class RateLimitWrapper:
     """
@@ -217,16 +217,17 @@ class ModelValidator:
                              model=self.model,
                              prompt=prompts[0],
                              project_name=self.project_name)
-        await ai_parser.initialize()
-        
-        for prompt in prompts:
-            ai_parser.prompt = prompt
-            article_data = await ai_parser.select_article_to_api(url=url, 
+        try:
+            await ai_parser.initialize()
+            for prompt in prompts:
+                ai_parser.prompt = prompt
+                article_data = await ai_parser.select_article_to_api(url=url, 
                                                                  include_url=True,
                                                                  avg_pause=1)
-            responses.append(article_data)
+                responses.append(article_data)
         
-        await ai_parser.close()
+        finally:
+            await ai_parser.cleanup()
         return responses
     
     @staticmethod
@@ -270,6 +271,7 @@ class ModelValidator:
 
     async def consolidate_responses(self) -> pd.DataFrame:
         data = await self.get_all_url_responses()
+        print("Data received", data)
         try:
             # data has a list of lists
                 # outermost list is each url 
@@ -279,48 +281,71 @@ class ModelValidator:
                             # Inner dict has keys for all query cols
             rows = [self.flatten_dict(queries) for element in data for queries in element]
         except TypeError:
+            print("TypeError occurred during flattening")
             breakpoint()
 
         df = pd.DataFrame(rows)
+        print("DataFrame created. Shape:", df.shape)  # Add this line
+        print("DataFrame columns:", df.columns)  # Add this line
+        print("DataFrame dtypes:", df.dtypes)  # Add this line
         df.name = self.project_name
         df['url'] = df['url'].astype(str)
-        
+        # Convert all object columns to strings
+        for col in df.select_dtypes(include=['object']):
+            df[col] = df[col].astype(str)
 
-        def clean_value(value):
-            if isinstance(value, list):
-                return ','.join(map(str, value))
-            elif pd.isna(value):
-                return None
-            else:
-                return value
+        # Replace 'None' strings with None
+        df = df.replace('None', None) 
+        df = df.replace({'nan': None}).fillna("None")
 
-        df = df.map(clean_value)
-        print(df.dtypes)
-        self.log_value_types(df)
+        print("DataFrame after type conversions:")  # Add this line
+        print(df.dtypes)  # Add this line
         try:
             conn = sqlite3.connect(':memory:')
             df.to_sql('responses', conn, index=False, if_exists='replace')
             # Need to add GROUP_CONCAT for all the other columns
             # Maybe do it automatically  
-            query = """
-            SELECT url,
-                   GROUP_CONCAT(owner) as owner,
-                   GROUP_CONCAT(offtaker) as offtaker,
-                   GROUP_CONCAT(storage_energy) as storage_energy,
-                   GROUP_CONCAT(storage_power) as storage_power
+            #query = """
+            #SELECT url,
+            #       GROUP_CONCAT(owner) as owner,
+            #       GROUP_CONCAT(offtaker) as offtaker,
+            #       GROUP_CONCAT(storage_energy) as storage_energy,
+            #       GROUP_CONCAT(storage_power) as storage_power
+            #FROM responses
+            #GROUP BY url
+            #"""
+            #
+            # Dynamically create the GROUP_CONCAT part of the query
+            group_concat_cols = [f"GROUP_CONCAT({col}) as {col}" for col in df.columns if col != 'url']
+            group_concat_query = ", ".join(group_concat_cols)
+        
+            query = f"""
+            SELECT url, {group_concat_query}
             FROM responses
             GROUP BY url
-            """
-
+            """# Dynamically create the GROUP_CONCAT part of the query
+            group_concat_cols = [f"GROUP_CONCAT({col}) as {col}" for col in df.columns if col != 'url']
+            group_concat_query = ", ".join(group_concat_cols)
+        
+            query = f"""
+            SELECT url, {group_concat_query}
+            FROM responses
+            GROUP BY url
+            """            
             grouped_df = pd.read_sql_query(query, conn)
 
-            for col in ['owner', 'offtaker', 'storage_energy', 'storage_power']:
-                grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
-
+            #for col in ['owner', 'offtaker', 'storage_energy', 'storage_power']:
+            #    grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
+            # Split the concatenated strings back into lists
+            for col in grouped_df.columns:
+                if col != 'url':
+                    grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
             conn.close()
-        except TypeError as e:
-            print(f"error is {e}")
-            breakpoint()
 
+        except Exception as e:
+            print(f"error is {e}")
+            print("Dataframe at time of error:")
+            print(df.head())
         return grouped_df 
+
 
