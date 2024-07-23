@@ -243,12 +243,27 @@ class ModelValidator:
 
     async def get_all_url_responses(self) -> dict:
         urls = [url for url in self.url_df.apply(self.extract_urls).dropna()]
-        responses = [await self.get_responses_for_url(url[0]) for url in tqdm(urls, desc="Getting responses for URLs")]
+        responses = []
+
+        for url in tqdm(urls, desc="Getting responses for URLs"):
+            response = await self.get_responses_for_url(url[0])
+            if response:
+                responses.append(response)
+            else:
+                logger.warning(f"No response for URL: {url[0]}")
+    
         return responses
+    #async def get_all_url_responses(self) -> dict:
+    #    urls = [url for url in self.url_df.apply(self.extract_urls).dropna()]
+    #    responses = [await self.get_responses_for_url(url[0]) for url in tqdm(urls, desc="Getting responses for URLs")]
+    #    return responses
 
 
     def flatten_dict(self, input_dict)->list:
         """Make url into just one k:v pair alongside others"""
+        if input_dict is None:
+            logger.warning("Encountered None input in flatten_dict")
+            return {}
         # Extract the single URL and its associated data
         url, attributes = next(iter(input_dict.items()))
         # Flatten
@@ -268,10 +283,28 @@ class ModelValidator:
             for i, val in enumerate(df[col]):
                 print(f"Row {i}, Column '{col}': Value '{val}', Type {type(val)}")
 
+    def clean_strings(self, series):
+        def process_string(x):
+            if isinstance(x, (float, type(None))):
+                return ""
+            if isinstance(x, list):
+                elements = [str(i).strip() for i in x if str(i).strip().lower() not in ['nan', 'none', '']]
+            else:
+                elements = str(x).split(',')
+                filtered_elements = [i.strip() for i in elements if i.strip().lower() not in ['nan', 'none', '']]
+            return ', '.join(sorted(set(filtered_elements)))
+
+        return series.apply(process_string)
 
     async def consolidate_responses(self) -> pd.DataFrame:
         data = await self.get_all_url_responses()
-        print("Data received", data)
+        logger.info("Data received: %s", data)
+
+        for element in data:
+            if element is None:
+                logger.error("Encoutnered None element in data")
+                continue
+
         try:
             # data has a list of lists
                 # outermost list is each url 
@@ -281,40 +314,24 @@ class ModelValidator:
                             # Inner dict has keys for all query cols
             rows = [self.flatten_dict(queries) for element in data for queries in element]
         except TypeError:
-            print("TypeError occurred during flattening")
+            logger.error("TypeError occurred during flattening")
             breakpoint()
 
         df = pd.DataFrame(rows)
-        print("DataFrame created. Shape:", df.shape)  # Add this line
-        print("DataFrame columns:", df.columns)  # Add this line
-        print("DataFrame dtypes:", df.dtypes)  # Add this line
+        logger.info(f"DataFrame created. Shape: {df.shape}")  # Add this line
+        logger.info(f"DataFrame columns: {df.columns}")  # Add this line
+        logger.info(f"DataFrame dtypes: {df.dtypes}")  # Add this line
         df.name = self.project_name
         df['url'] = df['url'].astype(str)
         # Convert all object columns to strings
         for col in df.select_dtypes(include=['object']):
             df[col] = df[col].astype(str)
 
-        # Replace 'None' strings with None
-        df = df.replace('None', None) 
-        df = df.replace({'nan': None}).fillna("None")
-
-        print("DataFrame after type conversions:")  # Add this line
-        print(df.dtypes)  # Add this line
+        logger.info("DataFrame after type conversions:")  # Add this line
+        logger.info(df.dtypes)  # Add this line
         try:
             conn = sqlite3.connect(':memory:')
             df.to_sql('responses', conn, index=False, if_exists='replace')
-            # Need to add GROUP_CONCAT for all the other columns
-            # Maybe do it automatically  
-            #query = """
-            #SELECT url,
-            #       GROUP_CONCAT(owner) as owner,
-            #       GROUP_CONCAT(offtaker) as offtaker,
-            #       GROUP_CONCAT(storage_energy) as storage_energy,
-            #       GROUP_CONCAT(storage_power) as storage_power
-            #FROM responses
-            #GROUP BY url
-            #"""
-            #
             # Dynamically create the GROUP_CONCAT part of the query
             group_concat_cols = [f"GROUP_CONCAT({col}) as {col}" for col in df.columns if col != 'url']
             group_concat_query = ", ".join(group_concat_cols)
@@ -323,29 +340,26 @@ class ModelValidator:
             SELECT url, {group_concat_query}
             FROM responses
             GROUP BY url
-            """# Dynamically create the GROUP_CONCAT part of the query
-            group_concat_cols = [f"GROUP_CONCAT({col}) as {col}" for col in df.columns if col != 'url']
-            group_concat_query = ", ".join(group_concat_cols)
+            """
         
-            query = f"""
-            SELECT url, {group_concat_query}
-            FROM responses
-            GROUP BY url
-            """            
             grouped_df = pd.read_sql_query(query, conn)
-
+            breakpoint()
             #for col in ['owner', 'offtaker', 'storage_energy', 'storage_power']:
             #    grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
             # Split the concatenated strings back into lists
-            for col in grouped_df.columns:
-                if col != 'url':
-                    grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
+            #for col in grouped_df.columns:
+            #    if col != 'url':
+            #        grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
             conn.close()
 
         except Exception as e:
-            print(f"error is {e}")
-            print("Dataframe at time of error:")
-            print(df.head())
-        return grouped_df 
-
-
+            logger.error(f"error is {e}")
+            logger.error("Dataframe at time of error:")
+            logger.error(df.head())
+        
+        #deal with NaN/None and duplicates
+        for column in grouped_df.select_dtypes(include=['object']):
+            grouped_df[column] = self.clean_strings(grouped_df[column])
+        breakpoint() 
+        return grouped_df
+    
