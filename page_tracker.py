@@ -13,6 +13,8 @@ from string import Template
 from tqdm import tqdm
 from playwright.async_api import async_playwright 
 
+from typing import Any, List
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -257,8 +259,6 @@ class ModelValidator:
     #    urls = [url for url in self.url_df.apply(self.extract_urls).dropna()]
     #    responses = [await self.get_responses_for_url(url[0]) for url in tqdm(urls, desc="Getting responses for URLs")]
     #    return responses
-
-
     def flatten_dict(self, input_dict)->list:
         """Make url into just one k:v pair alongside others"""
         if input_dict is None:
@@ -270,96 +270,122 @@ class ModelValidator:
         flattened_dict = {k:v for k, v in attributes.items()}
         flattened_dict['url'] = url
         return flattened_dict
-    
-    
-    @staticmethod
-    def custom_agg(series):
-        non_null_values = series.dropna().unique().tolist()
-        return non_null_values if non_null_values else [None]
 
-
-    def log_value_types(self, df):
-        for col in df.columns:
-            for i, val in enumerate(df[col]):
-                print(f"Row {i}, Column '{col}': Value '{val}', Type {type(val)}")
-
-    def clean_strings(self, series):
-        def process_string(x):
-            if isinstance(x, (float, type(None))):
-                return ""
-            if isinstance(x, list):
-                elements = [str(i).strip() for i in x if str(i).strip().lower() not in ['nan', 'none', '']]
-            else:
-                elements = str(x).split(',')
-                filtered_elements = [i.strip() for i in elements if i.strip().lower() not in ['nan', 'none', '']]
-            return ', '.join(sorted(set(filtered_elements)))
-
-        return series.apply(process_string)
-
-    async def consolidate_responses(self) -> pd.DataFrame:
-        data = await self.get_all_url_responses()
-        logger.info("Data received: %s", data)
-
-        for element in data:
-            if element is None:
-                logger.error("Encoutnered None element in data")
-                continue
-
+    async def preprocess_data(self, data) -> pd.DataFrame:
         try:
-            # data has a list of lists
-                # outermost list is each url 
-                    # 2nd level list is the queries for each url
-                        # 2d level is all dicts of dicts
-                        # outer dict key is the url
-                            # Inner dict has keys for all query cols
-            rows = [self.flatten_dict(queries) for element in data for queries in element]
+            flatten_data = [self.flatten_dict(queries) for element in data for queries in element]
         except TypeError:
+            logger = logging.getLogger(__name__)
             logger.error("TypeError occurred during flattening")
             breakpoint()
+            
+        df = pd.DataFrame(flatten_data)
+        logger.info("DataFrame created. Shape: %s", df.shape)
+        logger.info("DataFrame columns: %s", df.columns)
+        logger.info("DataFrame dtypes: %s", df.dtypes)
+    
+        return df
 
-        df = pd.DataFrame(rows)
-        logger.info(f"DataFrame created. Shape: {df.shape}")  # Add this line
-        logger.info(f"DataFrame columns: {df.columns}")  # Add this line
-        logger.info(f"DataFrame dtypes: {df.dtypes}")  # Add this line
-        df.name = self.project_name
+    @staticmethod
+    def clean_and_validate_json(element: str) -> str:
+        try:
+            parsed = json.loads(element)
+            if isinstance(parsed, list):
+                cleaned_list = list({json.dumps(item) for item in parsed if item and str(item).lower() not in ['nan', 'none', '']})
+                return json.dumps([json.loads(item) for item in cleaned_list])
+            elif isinstance(parsed, dict):
+                cleaned_dict = {k: v for k, v in parsed.items() if v and str(v).lower() not in ['nan', 'none', '']}
+                return json.dumps(cleaned_dict)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    @staticmethod
+    def process_element(element: str) -> str:
+        if element is None or (isinstance(element, str) and element.lower() in ['nan', 'none', '']):
+            return None
+        
+        valid_json = ModelValidator.clean_and_validate_json(element)
+        if valid_json is not None:
+            return valid_json
+        
+        elements = str(element).split(',')
+        filtered_elements = [i.strip() for i in elements if i.strip().lower() not in ['nan', 'none', '']]
+        return ', '.join(sorted(set(filtered_elements)))
+
+    @staticmethod
+    def clean_strings(series: pd.Series) -> pd.Series:
+        return series.apply(ModelValidator.process_element)
+    
+    @staticmethod
+    def json_group_concat(json_strings: List[str]) -> str:
+        aggregated = []
+        for value in json_strings:
+            if not value:
+                continue
+            try:
+                value_json = json.loads(value)
+                if isinstance(value_json, list):
+                    aggregated.extend(value_json)
+                else:
+                    aggregated.append(value_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return json.dumps(list({json.dumps(item) for item in aggregated}))
+
+    @staticmethod
+    def setup_custom_aggregator(connection: sqlite3.Connection):
+        connection.create_aggregate("json_group_concat", 1, ModelValidator.json_group_concat)
+    
+    async def preprocess_data(self, data: List[Any]) -> pd.DataFrame:
+        try:
+            flatten_data = [self.flatten_dict(queries) for element in data for queries in element]
+        except TypeError:
+            logger = logging.getLogger(__name__)
+            logger.error("TypeError occurred during flattening")
+            breakpoint()
+            
+        df = pd.DataFrame(flatten_data)
+        logger = logging.getLogger(__name__)
+        logger.info("DataFrame created. Shape: %s", df.shape)
+        logger.info("DataFrame columns: %s", df.columns)
+        logger.info("DataFrame dtypes: %s", df.dtypes)
+        return df
+
+    @staticmethod
+    def convert_types(df: pd.DataFrame) -> pd.DataFrame:
         df['url'] = df['url'].astype(str)
-        # Convert all object columns to strings
         for col in df.select_dtypes(include=['object']):
             df[col] = df[col].astype(str)
+        logger = logging.getLogger(__name__)
+        logger.info("DataFrame after type conversions: %s", df.dtypes)
+        return df
 
-        logger.info("DataFrame after type conversions:")  # Add this line
-        logger.info(df.dtypes)  # Add this line
-        try:
-            conn = sqlite3.connect(':memory:')
-            df.to_sql('responses', conn, index=False, if_exists='replace')
-            # Dynamically create the GROUP_CONCAT part of the query
-            group_concat_cols = [f"GROUP_CONCAT({col}) as {col}" for col in df.columns if col != 'url']
-            group_concat_query = ", ".join(group_concat_cols)
+    def setup_database(self, df: pd.DataFrame) -> pd.DataFrame:
+        conn = sqlite3.connect(':memory:')
+        self.setup_custom_aggregator(conn)
         
+        try:
+            df.to_sql('responses', conn, index=False, if_exists='replace')
+            
+            group_concat_cols = [f"json_group_concat({col}) as {col}" for col in df.columns if col != 'url']
+            group_concat_query = ", ".join(group_concat_cols)
+            
             query = f"""
             SELECT url, {group_concat_query}
             FROM responses
             GROUP BY url
             """
-        
+    
             grouped_df = pd.read_sql_query(query, conn)
-            breakpoint()
-            #for col in ['owner', 'offtaker', 'storage_energy', 'storage_power']:
-            #    grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
-            # Split the concatenated strings back into lists
-            #for col in grouped_df.columns:
-            #    if col != 'url':
-            #        grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
+        finally:
             conn.close()
-
-        except Exception as e:
-            logger.error(f"error is {e}")
-            logger.error("Dataframe at time of error:")
-            logger.error(df.head())
-        
-        #deal with NaN/None and duplicates
-        for column in grouped_df.select_dtypes(include=['object']):
-            grouped_df[column] = self.clean_strings(grouped_df[column])
-        breakpoint() 
+            
         return grouped_df
+
+    def clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        df.replace({pd.NA: None, 'nan': None, 'none': None, '': None}, inplace=True)
+        for column in df.select_dtypes(include=['object']):
+            df[column] = self.clean_strings(df[column])
+        return df
+
     
