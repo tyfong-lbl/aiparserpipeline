@@ -388,4 +388,27 @@ class ModelValidator:
             df[column] = self.clean_strings(df[column])
         return df
 
+    async def consolidate_responses(self) -> pd.DataFrame:
+        logger = logging.getLogger(__name__)
+        data = await self.get_all_url_responses()
+        
+        logger.info("Data received: %s", data)
     
+        if any(element is None for element in data):
+            logger.error("Encountered None element in data")
+            
+        df = await self.preprocess_data(data)
+        df = self.convert_types(df)
+        
+        try:
+            grouped_df = self.setup_database(df)
+        except Exception as e:
+            logger.error("Error is %s", e)
+            logger.error("Dataframe at time of error: %s", df.head())
+            breakpoint()
+            raise e
+        
+        grouped_df = self.clean_data(grouped_df)
+        breakpoint()
+        return grouped_df
+ 

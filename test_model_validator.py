@@ -1,19 +1,14 @@
-import asyncio 
-import os
+import asyncio
 import pandas as pd
-import re
+import os
+from model_validator import ModelValidator 
 
-from datetime import datetime
-from page_tracker import ModelValidator 
 from pathlib import Path
-from string import Template 
-
 # Note that you must be on the lab VPN for this to work. 
 api_key = os.environ.get('CYCLOGPT_API_KEY')
 api_url = "https://api.cborg.lbl.gov"
 
-#model = 'lbl/llama-3'
-model ='anthropic/claude-sonnet'
+model = 'lbl/llama-3'
 
 
 variables = { 
@@ -29,8 +24,8 @@ url_df = gt_df['urls']
 project_name = 'Slate Hybrid'
 current_directory = Path(__file__).resolve().parent
 prompt_directory = Path(current_directory,'test_prompts')
-
 async def main():
+    project_name = 'example_project'
     model_validator = ModelValidator(number_of_queries=5,
                                  prompt_dir_path=prompt_directory,
                                  prompt_filename_base='solar-projects-priority-prompt',
@@ -39,25 +34,23 @@ async def main():
                                  model=model,
                                  project_name=project_name,
                                  url_df=url_df)
-
+    # Mock the async function get_all_url_responses
+    async def mock_get_all_url_responses():
+        # Provide mock data as needed
+        return [
+            [{'url': 'http://example.com', 'response': '{"key": "value"}'}],
+            [{'url': 'http://example.com', 'response': '{"key2": "value2"}'}]
+        ]
+    
+    # Assign the mock function to the instance
+    model_validator.get_all_url_responses = mock_get_all_url_responses
+   
+    # Mock the flatten_dict function
+    model_validator.flatten_dict = lambda x: x  # Replace with actual flatten_dict logic
+    
+    # Run the consolidate_responses method and print the resulting DataFrame
     df = await model_validator.consolidate_responses()
-    now = datetime.now()
-    datetime_str = now.strftime('%Y-%m-%d-%H%M')
-    # Maybe edit the output name to show the model name!
-    # Edit the model name to remove the slash
-    p = Path(model)
-    stripped_path = p.relative_to("lbl")
-    model_name = str(stripped_path)
-    csv_name = f"test_readout_{model_name}_{datetime_str}.csv"
-    df.to_csv(csv_name)
+    print(df)
 
-
-if __name__=="__main__":
+if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-
-
-
-

@@ -64,8 +64,10 @@ def get_all_articles(article_urls):
                 rows.append({'url':article_url,
                      'title': article_title,
                      'text': article_body})
+                print(f"Article title is {article_title}")
+                print()
     df = pd.DataFrame(rows)
-    return rows
+    return df
 
 
 
