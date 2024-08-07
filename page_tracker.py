@@ -295,6 +295,21 @@ class ModelValidator:
             return ', '.join(sorted(set(filtered_elements)))
 
         return series.apply(process_string)
+    
+
+    def aggregate_data(self, group):
+        result = {}
+        for column in group.columns:
+            if column != 'url':  # Skip the 'url' column
+                unique_values = group[column].dropna().unique()
+                if len(unique_values) == 1:
+                    result[column] = unique_values[0]
+                elif len(unique_values) > 1:
+                    result[column] = list(unique_values)
+                else:
+                    result[column] = None
+        return pd.Series(result)
+
 
     async def consolidate_responses(self) -> pd.DataFrame:
         data = await self.get_all_url_responses()
@@ -318,39 +333,47 @@ class ModelValidator:
             breakpoint()
 
         df = pd.DataFrame(rows)
+        breakpoint()
         logger.info(f"DataFrame created. Shape: {df.shape}")  # Add this line
         logger.info(f"DataFrame columns: {df.columns}")  # Add this line
         logger.info(f"DataFrame dtypes: {df.dtypes}")  # Add this line
-        df.name = self.project_name
+        df['name'] = self.project_name
         df['url'] = df['url'].astype(str)
-        # Convert all object columns to strings
-        for col in df.select_dtypes(include=['object']):
-            df[col] = df[col].astype(str)
-
-        logger.info("DataFrame after type conversions:")  # Add this line
-        logger.info(df.dtypes)  # Add this line
         try:
-            conn = sqlite3.connect(':memory:')
-            df.to_sql('responses', conn, index=False, if_exists='replace')
-            # Dynamically create the GROUP_CONCAT part of the query
-            group_concat_cols = [f"GROUP_CONCAT({col}) as {col}" for col in df.columns if col != 'url']
-            group_concat_query = ", ".join(group_concat_cols)
+            for col in df.columns:
+                df[col] = df[col].astype(str)
+                #df[col] = df[col].apply(lambda x: str(x) if isinstance(x,(list,dict)) else x)
+            grouped_df = df.groupby('url', as_index=False).apply(self.aggregate_data)
+            # consolidate 
+        # Convert all object columns to strings
+
+        #for col in df.select_dtypes(include=['object']):
+        #    df[col] = df[col].astype(str)
+
+        #logger.info("DataFrame after type conversions:")  # Add this line
+        #logger.info(df.dtypes)  # Add this line
+        #try:
+        #    conn = sqlite3.connect(':memory:')
+        #    df.to_sql('responses', conn, index=False, if_exists='replace')
+        #    # Dynamically create the GROUP_CONCAT part of the query
+        #    group_concat_cols = [f"GROUP_CONCAT({col}) as {col}" for col in df.columns if col != 'url']
+        #    group_concat_query = ", ".join(group_concat_cols)
         
-            query = f"""
-            SELECT url, {group_concat_query}
-            FROM responses
-            GROUP BY url
-            """
+        #    query = f"""
+        #    SELECT url, {group_concat_query}
+        #    FROM responses
+        #    GROUP BY url
+        #    """
         
-            grouped_df = pd.read_sql_query(query, conn)
-            breakpoint()
-            #for col in ['owner', 'offtaker', 'storage_energy', 'storage_power']:
-            #    grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
-            # Split the concatenated strings back into lists
-            #for col in grouped_df.columns:
-            #    if col != 'url':
-            #        grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
-            conn.close()
+        #    grouped_df = pd.read_sql_query(query, conn)
+        #    breakpoint()
+        #    #for col in ['owner', 'offtaker', 'storage_energy', 'storage_power']:
+        #    #    grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
+        #    # Split the concatenated strings back into lists
+        #    #for col in grouped_df.columns:
+        #    #    if col != 'url':
+        #    #        grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
+        #    conn.close()
 
         except Exception as e:
             logger.error(f"error is {e}")
@@ -358,8 +381,8 @@ class ModelValidator:
             logger.error(df.head())
         
         #deal with NaN/None and duplicates
-        for column in grouped_df.select_dtypes(include=['object']):
-            grouped_df[column] = self.clean_strings(grouped_df[column])
+        #for column in grouped_df.select_dtypes(include=['object']):
+        #    grouped_df[column] = self.clean_strings(grouped_df[column])
         breakpoint() 
         return grouped_df
     
