@@ -1,3 +1,4 @@
+import ast 
 import asyncio 
 import openai
 import numpy as np
@@ -155,6 +156,17 @@ class RateLimitWrapper:
         self.max_calls = 0
 
 
+def remove_nan(x):
+    print(f"Received value: {x}")
+    if isinstance(x, str) and x.startswith('['):
+        x = ast.literal_eval(x) 
+        x = [i for i in x if i != 'nan']
+        return x
+    elif isinstance(x, list):
+        return [i for i in x if not pd.isnull(i)]
+    else:
+        return x
+
 class ModelValidator:
     def __init__(self,
                  number_of_queries: int,
@@ -310,7 +322,6 @@ class ModelValidator:
                     result[column] = None
         return pd.Series(result)
 
-
     async def consolidate_responses(self) -> pd.DataFrame:
         data = await self.get_all_url_responses()
         logger.info("Data received: %s", data)
@@ -333,7 +344,6 @@ class ModelValidator:
             breakpoint()
 
         df = pd.DataFrame(rows)
-        breakpoint()
         logger.info(f"DataFrame created. Shape: {df.shape}")  # Add this line
         logger.info(f"DataFrame columns: {df.columns}")  # Add this line
         logger.info(f"DataFrame dtypes: {df.dtypes}")  # Add this line
@@ -344,45 +354,13 @@ class ModelValidator:
                 df[col] = df[col].astype(str)
                 #df[col] = df[col].apply(lambda x: str(x) if isinstance(x,(list,dict)) else x)
             grouped_df = df.groupby('url', as_index=False).apply(self.aggregate_data)
-            # consolidate 
-        # Convert all object columns to strings
-
-        #for col in df.select_dtypes(include=['object']):
-        #    df[col] = df[col].astype(str)
-
-        #logger.info("DataFrame after type conversions:")  # Add this line
-        #logger.info(df.dtypes)  # Add this line
-        #try:
-        #    conn = sqlite3.connect(':memory:')
-        #    df.to_sql('responses', conn, index=False, if_exists='replace')
-        #    # Dynamically create the GROUP_CONCAT part of the query
-        #    group_concat_cols = [f"GROUP_CONCAT({col}) as {col}" for col in df.columns if col != 'url']
-        #    group_concat_query = ", ".join(group_concat_cols)
-        
-        #    query = f"""
-        #    SELECT url, {group_concat_query}
-        #    FROM responses
-        #    GROUP BY url
-        #    """
-        
-        #    grouped_df = pd.read_sql_query(query, conn)
-        #    breakpoint()
-        #    #for col in ['owner', 'offtaker', 'storage_energy', 'storage_power']:
-        #    #    grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
-        #    # Split the concatenated strings back into lists
-        #    #for col in grouped_df.columns:
-        #    #    if col != 'url':
-        #    #        grouped_df[col] = grouped_df[col].apply(lambda x: x.split(',') if x else [None])
-        #    conn.close()
-
+            # Write to csv to normalize data or else remove nan fails
+            grouped_df.to_csv("temp.csv")
+            df_csv = pd.read_csv("temp.csv")
+            output_df = df_csv.map(remove_nan)
         except Exception as e:
             logger.error(f"error is {e}")
             logger.error("Dataframe at time of error:")
             logger.error(df.head())
-        
-        #deal with NaN/None and duplicates
-        #for column in grouped_df.select_dtypes(include=['object']):
-        #    grouped_df[column] = self.clean_strings(grouped_df[column])
-        breakpoint() 
-        return grouped_df
+        return output_df 
     
