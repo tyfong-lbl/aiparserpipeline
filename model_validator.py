@@ -24,6 +24,7 @@ gt_file_path = os.environ.get('ENERGY_GROUNDTRUTH')
 gt_df = pd.read_excel(gt_file_path, sheet_name=None)
 
 url_df = gt_df['urls']
+breakpoint()
 
 project_name = 'Slate Hybrid'
 current_directory = Path(__file__).resolve().parent
