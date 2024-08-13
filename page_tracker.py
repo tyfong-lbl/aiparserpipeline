@@ -185,10 +185,9 @@ class ModelValidator:
         self.api_key = api_key
         self.api_url = api_url
         self.model = model
-        self.parser = parser
         self.prompt_dir = prompt_dir_path
         self.project_name = project_name
-        self.url_df = url_df[self.project_name]
+        self.url_df = url_df
     
     
     def read_file(self, file_path):

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import pickle
 
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ class MultiProjectValidator:
                  api_url: str,
                  model: str,
                  prompt_directory: Path,
+                 checkpoint_dir: Path,
                  number_of_queries: int = 5,
                  prompt_filename_base: str = 'solar-projects-priority-prompt'):
         self.excel_path = excel_path
@@ -22,25 +24,28 @@ class MultiProjectValidator:
         self.api_url = api_url
         self.model = model
         self.prompt_directory = prompt_directory
+        self.checkpoint_dir = checkpoint_dir
         self.number_of_queries = number_of_queries
         self.prompt_filename_base = prompt_filename_base
         
         self.url_df = None
         self.project_names = None
         self.common_params = None
+        self.completed_projects = set()
         
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
         
         self._load_excel_data()
         self._setup_common_params()
+        self._load_checkpoint()
 
     def _load_excel_data(self):
         """Load data from Excel file and extract project names."""
         try:
             gt_df = pd.read_excel(self.excel_path, sheet_name=None)
             self.url_df = gt_df['urls']
-            self.project_names = self.url_df['Project Name'].unique()
+            self.project_names = self.url_df.columns.unique()
             self.logger.info(f"Loaded {len(self.project_names)} projects from Excel file.")
         except Exception as e:
             self.logger.error(f"Error loading Excel file: {e}")
@@ -62,21 +67,24 @@ class MultiProjectValidator:
 
     def _save_checkpoint(self):
         """Save the current state to a checkpoint file."""
+        self.checkpoint_dir.mkdir(exist_ok=True)
         checkpoint_data = {
-            "completed_projects": list(self.completed_projects)
+            "completed_projects": list(self.completed_projects),
+            "article_cache": self.article_cache
         }
-        with open(self._get_checkpoint_path(), 'w') as f:
-            json.dump(checkpoint_data, f)
+        with open(self._get_checkpoint_path(), 'wb') as f:
+            pickle.dump(checkpoint_data, f)
         self.logger.info(f"Checkpoint saved. Completed projects: {len(self.completed_projects)}")
 
     def _load_checkpoint(self):
         """Load the state from a checkpoint file if it exists."""
         checkpoint_path = self._get_checkpoint_path()
         if checkpoint_path.exists():
-            with open(checkpoint_path, 'r') as f:
-                checkpoint_data = json.load(f)
+            with open(checkpoint_path, 'rb') as f:
+                checkpoint_data = pickle.load(f)
             self.completed_projects = set(checkpoint_data.get("completed_projects", []))
-            self.logger.info(f"Checkpoint loaded. Resuming with {len(self.completed_projects)} completed projects.")
+            self.article_cache = checkpoint_data.get("article_cache", {})
+            self.logger.info(f"Checkpoint loaded. Resuming with {len(self.completed_projects)} completed projects and {len(self.article_cache)} cached articles.")
         else:
             self.logger.info("No checkpoint found. Starting from the beginning.")
 
@@ -87,7 +95,7 @@ class MultiProjectValidator:
             return pd.DataFrame()
 
         self.logger.info(f"Processing project: {project_name}")
-        project_urls = self.url_df[self.url_df['Project Name'] == project_name]
+        project_urls = self.url_df[project_name]
         
         model_validator = ModelValidator(
             **self.common_params,
@@ -115,6 +123,18 @@ class MultiProjectValidator:
         all_results = pd.concat(results, ignore_index=True)
         self.logger.info(f"Finished processing all projects. Total rows: {len(all_results)}")
         return all_results
+
+
+    async def save_results(self, results, output_dir):
+        now = datetime.now()
+        datetime_str = now.strftime('%Y-%m-%d-%H%M')
+        # Edit the model name to remove the slash
+        p = Path(self.model)
+        stripped_path = p.relative_to("lbl")
+        model_name = str(stripped_path)
+        csv_name = f"readout_{model_name}_{datetime_str}.csv"
+        output_path = Path(output_dir,csv_name)
+        results.to_csv(output_path)
 
     async def run(self, output_dir: Path):
         """Main method to run the entire process."""
