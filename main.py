@@ -6,7 +6,8 @@ from pathlib import Path
 
 
 async def main():
-    excel_path = "/Users/TYFong/Desktop/worklogs/project_logs/ai_parser/Solar_Project_Tracker_ITexamples_2022.xlsx"
+    scratch_path = Path("/global/scratch/users/tyfong")
+    excel_path = os.environ.get('ENERGY_GROUNDTRUTH') 
     api_key = os.environ.get('CYCLOGPT_API_KEY')
     api_url = "https://api.cborg.lbl.gov"
     model = 'lbl/llama-3'
