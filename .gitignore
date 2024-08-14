@@ -171,6 +171,7 @@ cython_debug/
 *.db
 *.csv
 /groundtruth
+/checkpoints
 
 # error logs
 error_*.txt
