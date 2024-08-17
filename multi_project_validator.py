@@ -35,7 +35,8 @@ class MultiProjectValidator:
         
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
-        
+        self.project_outputs = {}
+
         self._load_excel_data()
         self._setup_common_params()
         self._load_checkpoint()
@@ -105,6 +106,7 @@ class MultiProjectValidator:
         
         try:
             df = await model_validator.consolidate_responses()
+            self.project_outputs[project_name] = df
             self.logger.info(f"Successfully processed project: {project_name}")
             self.completed_projects.add(project_name)
             self._save_checkpoint()
@@ -139,9 +141,9 @@ class MultiProjectValidator:
     async def run(self, output_dir: Path):
         """Main method to run the entire process."""
         self.logger.info("Starting multi-project validation process.")
+        await self._load_checkpoint()
         results = await self.process_all_projects()
-        self.save_results(results, output_dir)
+        await self.save_results(results, output_dir)
         self.logger.info("Multi-project validation process completed.")
         # Clean up checkpoint after successful completion
         os.remove(self._get_checkpoint_path())
-        self.logger.info("Checkpoint file removed after successful completion.")

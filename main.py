@@ -1,8 +1,13 @@
 import asyncio
+import aiofiles
 import os
 
 from multi_project_validator import MultiProjectValidator
 from pathlib import Path
+
+
+async def create_directory(directory_path):
+    await aiofiles.os.makedirs(directory_path, exist_ok=True)
 
 
 async def main():
@@ -14,7 +19,9 @@ async def main():
     output_dir = Path(__file__).resolve().parent / 'results'
     checkpoint_dir = Path(__file__).resolve().parent / 'checkpoints'
 
-    checkpoint_dir.mkdir(exist_ok=True)
+    await create_directory(prompt_directory)
+    await create_directory(output_dir)
+    await create_directory(checkpoint_dir)
 
     multi_validator = MultiProjectValidator(
         excel_path=excel_path,
