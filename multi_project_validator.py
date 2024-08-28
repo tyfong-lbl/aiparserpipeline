@@ -3,11 +3,13 @@ import json
 import logging
 import os
 import pickle
+import traceback
 
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
 from page_tracker import ModelValidator, AiParser
+
 
 class MultiProjectValidator:
     def __init__(self, 
@@ -24,7 +26,9 @@ class MultiProjectValidator:
         self.api_url = api_url
         self.model = model
         self.prompt_directory = prompt_directory
-        self.checkpoint_dir = checkpoint_dir
+        self.checkpoint_dir = Path(checkpoint_dir)
+        if self.checkpoint_dir is None:
+            raise ValueError("checkpoint_dir cannot be None")
         self.number_of_queries = number_of_queries
         self.prompt_filename_base = prompt_filename_base
         
@@ -44,8 +48,8 @@ class MultiProjectValidator:
     def _load_excel_data(self):
         """Load data from Excel file and extract project names."""
         try:
-            gt_df = pd.read_excel(self.excel_path, sheet_name=None)
-            self.url_df = gt_df['urls']
+            gt_df = pd.read_excel(self.excel_path, sheet_name="Sheet1")
+            self.url_df = gt_df
             self.project_names = self.url_df.columns.unique()
             self.logger.info(f"Loaded {len(self.project_names)} projects from Excel file.")
         except Exception as e:
@@ -64,55 +68,65 @@ class MultiProjectValidator:
         }
 
     def _get_checkpoint_path(self):
-        return self.checkpoint_dir / "checkpoint.json"
+        return self.checkpoint_dir / "checkpoint.pkl"
 
     def _save_checkpoint(self):
         """Save the current state to a checkpoint file."""
+        self.checkpoint_dir = Path(self.checkpoint_dir)
+        if self.checkpoint_dir is None:
+            self.logger.error("checkpoint_dir is None, cannot save checkpoint")
         self.checkpoint_dir.mkdir(exist_ok=True)
-        checkpoint_data = {
-            "completed_projects": list(self.completed_projects),
-            "article_cache": self.article_cache
-        }
         with open(self._get_checkpoint_path(), 'wb') as f:
-            pickle.dump(checkpoint_data, f)
+            pickle.dump(self.project_outputs, f)
         self.logger.info(f"Checkpoint saved. Completed projects: {len(self.completed_projects)}")
 
-    def _load_checkpoint(self):
+    async def _load_checkpoint(self):
         """Load the state from a checkpoint file if it exists."""
         checkpoint_path = self._get_checkpoint_path()
         if checkpoint_path.exists():
             with open(checkpoint_path, 'rb') as f:
-                checkpoint_data = pickle.load(f)
-            self.completed_projects = set(checkpoint_data.get("completed_projects", []))
-            self.article_cache = checkpoint_data.get("article_cache", {})
-            self.logger.info(f"Checkpoint loaded. Resuming with {len(self.completed_projects)} completed projects and {len(self.article_cache)} cached articles.")
+                self.project_outputs= pickle.load(f)
+            self.completed_projects = set(self.project_outputs.keys())
+            self.logger.info(f"Checkpoint loaded. Resuming with {len(self.completed_projects)} completed projects")
         else:
             self.logger.info("No checkpoint found. Starting from the beginning.")
 
     async def process_project(self, project_name: str) -> pd.DataFrame:
         """Process a single project."""
-        if project_name in self.completed_projects:
-            self.logger.info(f"Skipping already completed project: {project_name}")
-            return pd.DataFrame()
-
-        self.logger.info(f"Processing project: {project_name}")
-        project_urls = self.url_df[project_name]
-        
-        model_validator = ModelValidator(
-            **self.common_params,
-            project_name=project_name,
-            url_df=project_urls
-        )
-        
         try:
-            df = await model_validator.consolidate_responses()
-            self.project_outputs[project_name] = df
-            self.logger.info(f"Successfully processed project: {project_name}")
-            self.completed_projects.add(project_name)
-            self._save_checkpoint()
-            return df
+            if project_name in self.completed_projects:
+                self.logger.info(f"Skipping already completed project: {project_name}")
+                return pd.DataFrame()
+
+            self.logger.info(f"Processing project: {project_name}")
+            project_urls = self.url_df[project_name]
+            
+            model_validator = ModelValidator(
+                **self.common_params,
+                project_name=project_name,
+                url_df=project_urls
+            )
+            
+            try:
+                df = await model_validator.consolidate_responses()
+                self.project_outputs[project_name] = df
+                self.logger.info(f"Successfully processed project: {project_name}")
+                self.completed_projects.add(project_name)
+                self.logger.info("About to save checkpoint...")
+                try:
+                    await asyncio.to_thread(self._save_checkpoint())
+                except TypeError as e:
+                    print(e)
+                self.logger.info("Checkpoint saved")
+                return df
+            except Exception as e:
+                import traceback
+                self.logger.error(f"Error processing project {project_name}: {e}")
+                self.logger.error(traceback.format_exc())
+                return pd.DataFrame()  # Return empty DataFrame on error
         except Exception as e:
-            self.logger.error(f"Error processing project {project_name}: {e}")
+            self.logger.error(f"Unexpected error processing project {project_name}: {e}")
+            self.logger.error(traceback.format_exc())
             return pd.DataFrame()  # Return empty DataFrame on error
 
     async def process_all_projects(self) -> pd.DataFrame:
@@ -146,4 +160,6 @@ class MultiProjectValidator:
         await self.save_results(results, output_dir)
         self.logger.info("Multi-project validation process completed.")
         # Clean up checkpoint after successful completion
-        os.remove(self._get_checkpoint_path())
+        #checkpoint_path = self._get_checkpoint_path()
+        #if checkpoint_path.exists():
+        #    os.remove(checkpoint_path)
