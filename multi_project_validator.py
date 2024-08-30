@@ -11,6 +11,7 @@ import pandas as pd
 from page_tracker import ModelValidator, AiParser
 
 
+
 class MultiProjectValidator:
     def __init__(self, 
                  excel_path: str,
@@ -45,6 +46,13 @@ class MultiProjectValidator:
         self._setup_common_params()
         self._load_checkpoint()
 
+        self.writing_complete = asyncio.Event()
+        self.initiatlization_complete = asyncio.Event()
+
+    async def initialize(self):
+        await self._load_checkpoint()
+        self.initiatlization_complete.set()
+
     def _load_excel_data(self):
         """Load data from Excel file and extract project names."""
         try:
@@ -70,14 +78,14 @@ class MultiProjectValidator:
     def _get_checkpoint_path(self):
         return self.checkpoint_dir / "checkpoint.pkl"
 
-    def _save_checkpoint(self):
+    async def _save_checkpoint(self):
         """Save the current state to a checkpoint file."""
         self.checkpoint_dir = Path(self.checkpoint_dir)
         if self.checkpoint_dir is None:
             self.logger.error("checkpoint_dir is None, cannot save checkpoint")
         self.checkpoint_dir.mkdir(exist_ok=True)
         with open(self._get_checkpoint_path(), 'wb') as f:
-            pickle.dump(self.project_outputs, f)
+            await asyncio.to_thread(pickle.dump, self.project_outputs, f)
         self.logger.info(f"Checkpoint saved. Completed projects: {len(self.completed_projects)}")
 
     async def _load_checkpoint(self):
@@ -114,7 +122,7 @@ class MultiProjectValidator:
                 self.completed_projects.add(project_name)
                 self.logger.info("About to save checkpoint...")
                 try:
-                    await asyncio.to_thread(self._save_checkpoint())
+                    await self._save_checkpoint()
                 except TypeError as e:
                     print(e)
                 self.logger.info("Checkpoint saved")
@@ -130,36 +138,34 @@ class MultiProjectValidator:
             return pd.DataFrame()  # Return empty DataFrame on error
 
     async def process_all_projects(self) -> pd.DataFrame:
-        """Process all projects concurrently."""
         self.logger.info("Starting to process all projects.")
         remaining_projects = [p for p in self.project_names if p not in self.completed_projects]
+        
+        if not remaining_projects:
+            self.logger.info("All projects have already been processed. No new data to concatenate.")
+            return pd.DataFrame()  # Return an empty DataFrame instead of trying to concatenate
+
         tasks = [self.process_project(project_name) for project_name in remaining_projects]
         results = await asyncio.gather(*tasks)
         
-        all_results = pd.concat(results, ignore_index=True)
-        self.logger.info(f"Finished processing all projects. Total rows: {len(all_results)}")
-        return all_results
-
-
-    async def save_results(self, results, output_dir):
-        now = datetime.now()
-        datetime_str = now.strftime('%Y-%m-%d-%H%M')
-        # Edit the model name to remove the slash
-        p = Path(self.model)
-        stripped_path = p.relative_to("lbl")
-        model_name = str(stripped_path)
-        csv_name = f"readout_{model_name}_{datetime_str}.csv"
-        output_path = Path(output_dir,csv_name)
-        results.to_csv(output_path)
+        non_empty_results = [df for df in results if not df.empty]
+        if non_empty_results:
+            all_results = pd.concat(non_empty_results, ignore_index=True)
+            self.logger.info(f"Finished processing all projects. Total rows: {len(all_results)}")
+            return all_results
+        else:
+            self.logger.info("No new data was processed. Returning an empty DataFrame.")
+            return pd.DataFrame()
 
     async def run(self, output_dir: Path):
         """Main method to run the entire process."""
         self.logger.info("Starting multi-project validation process.")
-        await self._load_checkpoint()
+        await self.initialize()
         results = await self.process_all_projects()
-        await self.save_results(results, output_dir)
+        if results.empty:
+            self.logger.info("No new results to save.")
         self.logger.info("Multi-project validation process completed.")
+        self.writing_complete.set()
         # Clean up checkpoint after successful completion
         #checkpoint_path = self._get_checkpoint_path()
         #if checkpoint_path.exists():
-        #    os.remove(checkpoint_path)
