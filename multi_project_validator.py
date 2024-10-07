@@ -56,7 +56,7 @@ class MultiProjectValidator:
     def _load_excel_data(self):
         """Load data from Excel file and extract project names."""
         try:
-            gt_df = pd.read_excel(self.excel_path, sheet_name="Sheet1")
+            gt_df = pd.read_excel(self.excel_path, sheet_name="urls")
             self.url_df = gt_df
             self.project_names = self.url_df.columns.unique()
             self.logger.info(f"Loaded {len(self.project_names)} projects from Excel file.")

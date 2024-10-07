@@ -75,7 +75,7 @@ async def main():
 
     logging.info("Test log message")
     print("test message")
-    excel_path = "/Users/TYFong/Desktop/worklogs/project_logs/ai_parser/25_sample_columns.xlsx"
+    excel_path = "/Users/TYFong/Desktop/worklogs/project_logs/ai_parser/Solar_Project_Tracker_ITexamples_2022.xlsx"
     api_key = os.environ.get('CYCLOGPT_API_KEY')
     api_url = "https://api.cborg.lbl.gov"
     model = 'lbl/cborg-chat:latest'
