@@ -72,7 +72,7 @@ def scrape_articles(base_url, max_pages=5):
         return article_data
 
 # Run the scraper
-base_url = "https://pv-magazine-usa.com/category/installations/commercial-industrial-pv/"
+base_url = 'https://hub.jhu.edu/2022/08/03/skipjack-solar-center-now-operating/' #"https://pv-magazine-usa.com/category/installations/commercial-industrial-pv/"
 articles = scrape_articles(base_url, max_pages=3)  # Adjust max_pages as needed
 
 # Print or process the scraped data
