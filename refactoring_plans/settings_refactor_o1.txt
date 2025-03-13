@@ -1,0 +1,44 @@
+Below are three potential approaches to making configurations easier for users to set. Along with each approach, there is a brief rationale reflecting how one might compare and contrast them:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1) Command-Line Arguments
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Description: Extend your command-line interface (CLI) to accept additional arguments or options (e.g., --excel-path, --api-key, etc.).
+• Pros:
+  – Straightforward for users comfortable with the CLI.
+  – Parameters can be changed on-the-fly without editing source code.
+  – Easy to automate via shell scripts or CI/CD pipelines.
+• Cons:
+  – User must remember or look up the arguments each time.
+  – Long command lines can become unwieldy if there are many settings.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2) Separate Configuration File
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Description: Store all configuration options in an external file (e.g., a JSON, YAML, or .ini file). Your script would parse this file on startup, setting variables accordingly.
+• Pros:
+  – Centralizes configuration in one file, reducing clutter in your Python scripts.
+  – Users can easily share or version-control the config file.
+  – Reduces risk of accidental changes to the main code base.
+• Cons:
+  – Requires an extra file for distribution and potential user confusion if they aren’t familiar with the format.
+  – Slight overhead in code to parse and validate config values.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3) User-Editable Constants Inside main.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Description: Keep a section in main.py (or a dedicated Python settings module) containing user-adjustable variables (e.g., EXCEL_PATH = \"…\").
+• Pros:
+  – Simpler for smaller or internal scripts, especially if the same defaults are generally acceptable for everyone.
+  – Quick to change if the user already expects to modify Python code.
+• Cons:
+  – Changing the script means keeping a separate copy or patch for custom values.
+  – Merging changes in source control can be more error-prone if multiple contributors edit the same file.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EVALUATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• For personal or small-team usage where users are comfortable with Python, editing variables directly in main.py or a small settings.py module can be quite straightforward.
+• For broader usage or if non-Python-savvy users need to tweak settings, a separate configuration file (YAML or JSON) can be more intuitive.
+• For script automation or where you want maximum portability, command-line arguments are flexible and easily integrated into shell scripts or continuous integration workflows.
+Ultimately, you can:
+• Start with a separate configuration file if you anticipate many settings or expect multiple people to adjust them.
+• For simple personal tasks, embedding them in main.py or a settings.py is effective.
+• Provide command-line arguments for users who want advanced override capabilities.
+One practical strategy is to combine approaches—read from a default config file but allow overriding certain values via CLI flags. This way, you get the best of both worlds.
