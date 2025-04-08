@@ -76,7 +76,7 @@ async def main():
     logging.info("Test log message")
     print("test message")
     excel_path = "G:\\Shared drives\\USS\\Automation\\Solar_Project_Tracker_ITexamples_2022_noPDFs.xlsx"
-    api_key = os.environ.get('CYCLOGPT_API_KEY')
+    api_key = os.environ.get('CBORG_API_KEY')
     api_url = "https://api.cborg.lbl.gov"
     model = 'lbl/cborg-deepthought:latest' #lbl/cborg-chat:latest' # option list found here: https://cborg.lbl.gov/models/
     prompt_directory = Path(__file__).resolve().parent / 'test_prompts'
