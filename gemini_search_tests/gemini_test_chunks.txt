@@ -1,0 +1,16 @@
+
+                You are an analyst that conducts solar energy project research.
+You have access to Google Search to look up news about solar energy projects from the last three months. You are trying to find out about NEW solar energy projects that have been annouced or started building. 
+
+                 Question: Search the web for articles posted in the last three months about specific solar energy projects in the USA and return direct links to the articles, and NOT to pages that LINK to the articles. ONLY GET REAL EXISTING ARTICLES. The links MUST go to the SPECIFIC article. 
+                 Format: Return the data in a json format with the title of the article, url, and description as keys. 
+
+[{'retrieved_context': None,
+  'web': {'title': 'cleantechnica.com',
+          'uri': 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/AQXblryCggpiiyKSMmRwZkOCgxk52DH6j4-AMilT5zsgb-DizfwkowU4CXt7cV_o7DFN2PEWo3te4cYf8yMy8rgTheNjP7-3AXJcYv1l8qpO3uuOqvEJNTq5iAImuDSVaMNT-5wW1Y_Ph7c7602Tad2C9oIrVbgivTett32BXuflWS9Ep6jQF6g72AlZKu9RChK5XZhYKTcwXLMhzs1-Rx0sRCUo2tZy2LieulT_JwLrEXwW-ryLPyDS-cc='}},
+ {'retrieved_context': None,
+  'web': {'title': 'pv-magazine-usa.com',
+          'uri': 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/AQXblrwowNjH9rl_lc1dATv_fr25bXZ1Dw2unOIq8mWMgYEQq4IigaIu8ZJlK_b8Xtm8Rpwlx9BeXJB4TlUwBnWTE49NVL4JWaT9JWFV75c-8Y-WY4wx01fR2LI='}},
+ {'retrieved_context': None,
+  'web': {'title': 'cleantechnica.com',
+          'uri': 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/AQXblrwbkPCuw9Mpokqf-kCCIAMAY13Qdu_W9XqiGG6lbxw0qUHxcGxU3uW9lBPSFzIgB7NrJI6B-QtAmXdw6VV0-Hl4COyFASIqoYDwN6Ux6DCJEjCl1rsCMy51ZFRLz8vndN5FRLEp8rE8Swb5gf-2HAJAjia_WywGRZj3P8uJ6ZRLboDNbgwz3AENoJaNj8gqNl6QmuTKJlIwPkQieSLTaLN-x0KVzxYPmjg='}}]
