@@ -1,0 +1,4 @@
+{project name} ({state} OR {state_abb}) {owner name}
+{project name} ({state} OR {state_abb}) {offtaker name}
+{project name} ({state} OR {state_abb}) owner
+# {project name} ({state} OR {state_abb}) storage capacity mw

@@ -1,0 +1,14 @@
+{project name} ({state} OR {state_abb})
+{project name} ({state} OR {state_abb}) news
+{project name} ({state} OR {state_abb}) ("dc" mw OR "MWdc")
+{project name} ({state} OR {state_abb}) "ac" mw
+{project name} ({state} OR {state_abb}) (fixed tilt OR tracking OR trackers)
+{project name} ({state} OR {state_abb}) developer
+{project name} ({state} OR {state_abb}) (power purchase agreement OR "ppa" OR offtake)
+{project name} ({state} OR {state_abb}) (cost OR investment OR capital OR equity)
+{project name} ({state} OR {state_abb}) (battery OR storage)
+{project name} ({state} OR {state_abb}) inverter
+{project name} ({state} OR {state_abb}) (module OR panel)
+{project name} ({state} OR {state_abb}) ("EPC" OR engineering OR procurement OR construction)
+{project name} ({state} OR {state_abb}) ("O&M" OR maintenance)
+{project name} ({state} OR {state_abb}) community solar
