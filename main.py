@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from multi_project_validator import MultiProjectValidator
 from pathlib import Path
+from pipeline_logger import PipelineLogger
 
 tracemalloc.start()
 logging.basicConfig(level=logging.DEBUG,
@@ -86,16 +87,21 @@ async def main():
     await create_directory(prompt_directory)
     await create_directory(output_dir)
     await create_directory(checkpoint_dir)
+    await create_directory(Path(__file__).resolve().parent / 'pipeline_logs')
 
     checkpoint_path = Path(checkpoint_dir, checkpoint_filename)
 
+    pipeline_logs_dir = Path(__file__).resolve().parent / 'pipeline_logs'
+    logger = PipelineLogger(pipeline_logs_dir)
+    
     multi_validator = MultiProjectValidator(
         excel_path=excel_path,
         api_key=api_key,
         api_url=api_url,
         model=model,
         prompt_directory=prompt_directory,
-        checkpoint_dir=checkpoint_dir
+        checkpoint_dir=checkpoint_dir,
+        logger=logger
     )
 
     async with manage_checkpoint(checkpoint_path, args.keep_checkpoint) as (save_complete_event, cleanup_event):

@@ -13,7 +13,7 @@ from page_tracker import ModelValidator, AiParser
 
 
 class MultiProjectValidator:
-    def __init__(self, 
+    def __init__(self,
                  excel_path: str,
                  api_key: str,
                  api_url: str,
@@ -21,7 +21,8 @@ class MultiProjectValidator:
                  prompt_directory: Path,
                  checkpoint_dir: Path,
                  number_of_queries: int = 5,
-                 prompt_filename_base: str = 'solar-projects-priority-prompt'):
+                 prompt_filename_base: str = 'solar-projects-priority-prompt',
+                 logger=None):
         self.excel_path = excel_path
         self.api_key = api_key
         self.api_url = api_url
@@ -32,6 +33,7 @@ class MultiProjectValidator:
             raise ValueError("checkpoint_dir cannot be None")
         self.number_of_queries = number_of_queries
         self.prompt_filename_base = prompt_filename_base
+        self.pipeline_logger = logger
         
         self.url_df = None
         self.project_names = None
@@ -112,7 +114,8 @@ class MultiProjectValidator:
             model_validator = ModelValidator(
                 **self.common_params,
                 project_name=project_name,
-                url_df=project_urls
+                url_df=project_urls,
+                pipeline_logger=self.pipeline_logger
             )
             
             try:

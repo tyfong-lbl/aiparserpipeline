@@ -1,5 +1,5 @@
-import ast 
-import asyncio 
+import ast
+import asyncio
 import openai
 import numpy as np
 import concurrent.futures
@@ -9,26 +9,28 @@ import re
 import sqlite3
 import time
 import json
+from datetime import datetime
 from pathlib import Path
 from string import Template
 from tqdm import tqdm
-from playwright.async_api import async_playwright 
+from playwright.async_api import async_playwright
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class AiParser:
-    def __init__(self, 
+    def __init__(self,
                  api_key:str,
                  api_url:str,
                  model:str,
                  prompt:str,
                  project_name:str,
-                 publication_url=None
+                 publication_url=None,
+                 pipeline_logger=None
                  ) -> None:
         self.model = model
-        self.prompt = prompt,
+        self.prompt = prompt
         self.project_name = project_name
         self.api_key = api_key
         self.client = openai.OpenAI(
@@ -36,8 +38,9 @@ class AiParser:
             base_url=api_url
         )
         self.publication_url = publication_url
-        self.playwright = None 
-        self.browser = None 
+        self.playwright = None
+        self.browser = None
+        self.pipeline_logger = pipeline_logger
 
     async def initialize(self):
         self.playwright = await async_playwright().start()
@@ -66,6 +69,10 @@ class AiParser:
         values = {"PROJECT": self.project_name}
         template = Template(self.prompt)
         prompt_for_submission = template.substitute(values)
+        
+        # Start timing for LLM processing
+        llm_start_time = time.perf_counter()
+        
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -77,10 +84,32 @@ class AiParser:
                     }
                 ]
             )
-            return response.choices[0].message.content if response.choices else None
+            llm_end_time = time.perf_counter()
+            llm_processing_time = llm_end_time - llm_start_time
+            
+            response_content = response.choices[0].message.content if response.choices else None
+            
+            llm_metrics = {
+                'llm_response_status': response_content is not None,
+                'llm_response_error': None if response_content else "No response content from API",
+                'llm_processing_time': llm_processing_time
+            }
+            
+            return response_content, llm_metrics
+            
         except Exception as e:
+            llm_end_time = time.perf_counter()
+            llm_processing_time = llm_end_time - llm_start_time
+            
             logger.error(f"Error in API call: {e}")
-            return None
+            
+            llm_metrics = {
+                'llm_response_status': False,
+                'llm_response_error': str(e),
+                'llm_processing_time': llm_processing_time
+            }
+            
+            return None, llm_metrics
 
 
     @staticmethod
@@ -96,31 +125,90 @@ class AiParser:
 
 
     async def select_article_to_api(self, url:str, include_url:bool=True, avg_pause=0):
+        # Start timing for text extraction
+        text_extraction_start_time = time.perf_counter()
+        text_extraction_status = False
+        text_extraction_error = None
+        text_length = 0
+        
         try:
             page = await self.browser.new_page()
             await page.goto(url)
             title = await page.title()
             text = await page.evaluate('() => document.body.innerText')
             await page.close()
+            
+            fulltext = f"{title}.\n\n{text}"
+            text_length = len(fulltext)
+            text_extraction_status = True
+            text_extraction_error = None
+            
         except Exception as e:
             logger.error(f"Error fetching article: {e}")
+            text_extraction_status = False
+            text_extraction_error = str(e)
+            fulltext = ""
+            text_length = 0
+            
+            # Store logging context for later use
+            if self.pipeline_logger:
+                self.current_logging_context = {
+                    'url': url,
+                    'project_name': self.project_name,
+                    'text_extraction_start_time': text_extraction_start_time,
+                    'text_extraction_status': text_extraction_status,
+                    'text_extraction_error': text_extraction_error,
+                    'text_length': text_length
+                }
             return None
 
-        fulltext = f"{title}.\n\n{text}"
+        # Store logging context for successful text extraction
+        if self.pipeline_logger:
+            self.current_logging_context = {
+                'url': url,
+                'project_name': self.project_name,
+                'text_extraction_start_time': text_extraction_start_time,
+                'text_extraction_status': text_extraction_status,
+                'text_extraction_error': text_extraction_error,
+                'text_length': text_length
+            }
     
         try:
-            response_content = self.get_api_response(fulltext=fulltext)
+            response_content, llm_metrics = self.get_api_response(fulltext=fulltext)
             if response_content is None:
                 logger.error("No response content from API")
+                # Complete logging cycle for failed LLM processing
+                if self.pipeline_logger and hasattr(self, 'current_logging_context'):
+                    self._complete_logging_cycle(llm_metrics)
                 return None
             stripped = self.strip_markdown(response_content)
             data = json.loads(stripped)
         except json.JSONDecodeError as e:
             logger.error(f"JSONDecodeError encountered: {e}")
+            # Complete logging cycle for failed JSON parsing
+            if self.pipeline_logger and hasattr(self, 'current_logging_context'):
+                llm_metrics = {
+                    'llm_response_status': False,
+                    'llm_response_error': f"JSONDecodeError: {str(e)}",
+                    'llm_processing_time': 0
+                }
+                self._complete_logging_cycle(llm_metrics)
             return None
         except Exception as e:
             logger.error(f"Unexpected error during API response handling: {e}")
+            # Complete logging cycle for unexpected errors
+            if self.pipeline_logger and hasattr(self, 'current_logging_context'):
+                llm_metrics = {
+                    'llm_response_status': False,
+                    'llm_response_error': str(e),
+                    'llm_processing_time': 0
+                }
+                self._complete_logging_cycle(llm_metrics)
             return None
+
+        # Complete logging cycle for successful processing
+        if self.pipeline_logger and hasattr(self, 'current_logging_context'):
+            self._complete_logging_cycle(llm_metrics)
 
         tagged_data = {url: data} if include_url else data
 
@@ -130,6 +218,40 @@ class AiParser:
 
         return tagged_data
 
+    def _complete_logging_cycle(self, llm_metrics):
+        """Complete the logging cycle by writing to CSV with all collected metrics."""
+        if not self.pipeline_logger or not hasattr(self, 'current_logging_context'):
+            return
+            
+        context = self.current_logging_context
+        
+        # Calculate total response time
+        text_extraction_time = time.perf_counter() - context['text_extraction_start_time']
+        llm_processing_time = llm_metrics.get('llm_processing_time', 0)
+        total_response_time_ms = int((text_extraction_time + llm_processing_time) * 1000)
+        
+        # Generate current timestamp
+        current_timestamp = datetime.now().astimezone().isoformat()
+        
+        # Convert status values to strings and handle None errors
+        text_extraction_status_str = "True" if context['text_extraction_status'] else "False"
+        text_extraction_error_str = context['text_extraction_error'] if context['text_extraction_error'] else "None"
+        
+        llm_response_status_str = "True" if llm_metrics['llm_response_status'] else "False"
+        llm_response_error_str = llm_metrics['llm_response_error'] if llm_metrics['llm_response_error'] else "None"
+        
+        # Log to CSV
+        self.pipeline_logger.log_url_processing(
+            url=context['url'],
+            project_name=context['project_name'],
+            timestamp=current_timestamp,
+            text_extraction_status=text_extraction_status_str,
+            text_extraction_error=text_extraction_error_str,
+            text_length=context['text_length'],
+            llm_response_status=llm_response_status_str,
+            llm_response_error=llm_response_error_str,
+            response_time_ms=total_response_time_ms
+        )
 
     @staticmethod
     def articles_parser(self, urls: list, include_url=True, max_limit: int = None) -> list:
@@ -173,11 +295,12 @@ class ModelValidator:
                  prompt_dir_path,
                  prompt_filename_base: str,
                  api_key: str,
-                 api_url: str, 
+                 api_url: str,
                  model: str,
                  project_name:str,
                  url_df: pd.DataFrame,
                  parser=AiParser,
+                 pipeline_logger=None
 
                  ) -> None:
         self.number_of_queries = number_of_queries
@@ -188,6 +311,7 @@ class ModelValidator:
         self.prompt_dir = prompt_dir_path
         self.project_name = project_name
         self.url_df = url_df
+        self.pipeline_logger = pipeline_logger
     
     
     def read_file(self, file_path):
@@ -224,10 +348,11 @@ class ModelValidator:
         prompts = self.get_all_prompts()
         responses = []
         ai_parser = AiParser(api_key=self.api_key,
-                             api_url=self.api_url, 
+                             api_url=self.api_url,
                              model=self.model,
                              prompt=prompts[0],
-                             project_name=self.project_name)
+                             project_name=self.project_name,
+                             pipeline_logger=self.pipeline_logger)
         try:
             await ai_parser.initialize()
             for prompt in prompts:
