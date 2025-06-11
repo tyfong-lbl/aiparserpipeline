@@ -12,17 +12,17 @@
 
 ```mermaid
 graph TD
-    A[main.py] --> B[MultiProjectValidator.run()]
-    B --> C[process_all_projects()]
-    C --> D[process_project() for each project]
-    D --> E[ModelValidator.consolidate_responses()]
-    E --> F[AiParser.select_article_to_api()]
+    A[main.py] --> B[MultiProjectValidator.run]
+    B --> C[process_all_projects]
+    C --> D[process_project for each project]
+    D --> E[ModelValidator.consolidate_responses]
+    E --> F[AiParser.select_article_to_api]
     F --> G[Text Extraction via Playwright]
-    F --> H[get_api_response() - LLM Call]
+    F --> H[get_api_response LLM Call]
     
-    G --> I[PipelineLogger.log_url_processing()]
+    G --> I[PipelineLogger.log_url_processing]
     H --> I
-    I --> J[CSV File: pipeline_log_YYYY-MM-DD_HH-MM-SS.csv]
+    I --> J[CSV File with timestamp]
     
     style G fill:#e1f5fe
     style H fill:#e8f5e8
@@ -53,8 +53,8 @@ Create a simple logging utility and integrate it directly into existing methods 
 
 ```mermaid
 graph LR
-    A[Create PipelineLogger utility] --> B[Add logging calls to select_article_to_api()]
-    B --> C[Add logging calls to get_api_response()]
+    A[Create PipelineLogger utility] --> B[Add logging calls to select_article_to_api]
+    B --> C[Add logging calls to get_api_response]
     C --> D[Initialize logger in MultiProjectValidator]
     D --> E[Pass logger to AiParser instances]
 ```
