@@ -176,3 +176,4 @@ cython_debug/
 # error logs
 error_*.txt
 *.log
+/diagnostics

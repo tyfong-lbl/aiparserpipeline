@@ -462,7 +462,13 @@ class ModelValidator:
                         # 2d level is all dicts of dicts
                         # outer dict key is the url
                             # Inner dict has keys for all query cols
-            rows = [self.flatten_dict(queries) for element in data for queries in element]
+            # Replace line 465 with:
+            rows = [self.flatten_dict(query_response) 
+                    for url_responses in data 
+                    for query_response in url_responses 
+                    if query_response is not None]
+
+            #rows = [self.flatten_dict(queries) for element in data for queries in element]
         except TypeError:
             logger.error("TypeError occurred during flattening")
             breakpoint()
