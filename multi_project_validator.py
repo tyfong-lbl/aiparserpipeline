@@ -52,7 +52,7 @@ class MultiProjectValidator:
         self.initiatlization_complete = asyncio.Event()
 
     async def initialize(self):
-        await self._load_checkpoint()
+        self._load_checkpoint()
         self.initiatlization_complete.set()
 
     def _load_excel_data(self):
@@ -90,7 +90,7 @@ class MultiProjectValidator:
             await asyncio.to_thread(pickle.dump, self.project_outputs, f)
         self.logger.info(f"Checkpoint saved. Completed projects: {len(self.completed_projects)}")
 
-    async def _load_checkpoint(self):
+    def _load_checkpoint(self):
         """Load the state from a checkpoint file if it exists."""
         checkpoint_path = self._get_checkpoint_path()
         if checkpoint_path.exists():

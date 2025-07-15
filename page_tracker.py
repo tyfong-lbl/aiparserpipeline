@@ -150,6 +150,10 @@ class AiParser:
             fulltext = ""
             text_length = 0
             
+            # DIAGNOSTIC: Log what type of error occurred
+            logger.error(f"DIAGNOSTIC: Text extraction failed for {url} with error: {str(e)}")
+            logger.error(f"DIAGNOSTIC: Pipeline logger exists: {self.pipeline_logger is not None}")
+            
             # Store logging context for later use
             if self.pipeline_logger:
                 self.current_logging_context = {
@@ -160,6 +164,22 @@ class AiParser:
                     'text_extraction_error': text_extraction_error,
                     'text_length': text_length
                 }
+                
+                # DIAGNOSTIC: Confirm context was stored
+                logger.error(f"DIAGNOSTIC: Stored logging context for failed text extraction")
+                
+                # FIX: Complete logging cycle for text extraction failures
+                # Create dummy LLM metrics since no LLM processing occurred
+                dummy_llm_metrics = {
+                    'llm_response_status': False,
+                    'llm_response_error': 'Text extraction failed - no LLM processing attempted',
+                    'llm_processing_time': 0
+                }
+                
+                logger.error(f"DIAGNOSTIC: About to call _complete_logging_cycle for text extraction failure")
+                self._complete_logging_cycle(dummy_llm_metrics)
+                logger.error(f"DIAGNOSTIC: Completed logging cycle for text extraction failure")
+            
             return None
 
         # Store logging context for successful text extraction
