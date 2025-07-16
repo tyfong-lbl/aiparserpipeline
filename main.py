@@ -9,6 +9,8 @@ import tracemalloc
 import shutil
 import sys
 import traceback
+import fcntl
+import time
 from contextlib import asynccontextmanager
 
 from datetime import datetime
@@ -69,6 +71,78 @@ async def manage_checkpoint(checkpoint_path, keep_checkpoint):
         cleanup_event.set()
         await cleanup_task
 
+def acquire_process_lock():
+    """Acquire a file lock to prevent multiple processes from running simultaneously."""
+    lock_file_path = Path(__file__).resolve().parent / 'process.lock'
+    pid = os.getpid()
+    
+    try:
+        # Check if lock file exists and if the process is still running
+        if lock_file_path.exists():
+            try:
+                with open(lock_file_path, 'r') as f:
+                    existing_pid = int(f.readline().strip())
+                    existing_time = f.readline().strip()
+                
+                # Check if the process is still running
+                try:
+                    os.kill(existing_pid, 0)  # Signal 0 checks if process exists
+                    age = time.time() - float(existing_time)
+                    logging.info(f"PROCESS_LOCK: Active lock found - PID: {existing_pid}, Age: {age:.1f}s")
+                    return False, None
+                except (OSError, ProcessLookupError):
+                    # Process doesn't exist, remove stale lock
+                    lock_file_path.unlink()
+                    logging.info(f"PROCESS_LOCK: Removed stale lock from PID: {existing_pid}")
+            except Exception as e:
+                logging.warning(f"PROCESS_LOCK: Error checking existing lock: {e}")
+        
+        # Try to acquire exclusive lock
+        lock_file = open(lock_file_path, 'w')
+        try:
+            # Try to acquire exclusive lock (non-blocking)
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            
+            # Write PID and timestamp to lock file
+            lock_file.write(f"{pid}\n{time.time()}\n")
+            lock_file.flush()
+            
+            logging.info(f"PROCESS_LOCK: Acquired lock - PID: {pid}")
+            return True, lock_file
+            
+        except BlockingIOError:
+            # Lock is held by another process
+            lock_file.close()
+            try:
+                with open(lock_file_path, 'r') as f:
+                    existing_pid = f.readline().strip()
+                    existing_time = f.readline().strip()
+                logging.warning(f"PROCESS_LOCK: Failed to acquire lock - PID: {pid}, Existing PID: {existing_pid}, Time: {existing_time}")
+            except:
+                logging.warning(f"PROCESS_LOCK: Failed to acquire lock - PID: {pid}")
+            return False, None
+            
+    except Exception as e:
+        logging.error(f"PROCESS_LOCK: Error acquiring lock: {e}")
+        return False, None
+
+def release_process_lock(lock_file):
+    """Release the process lock."""
+    if lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
+            
+            # Remove lock file
+            lock_file_path = Path(__file__).resolve().parent / 'process.lock'
+            if lock_file_path.exists():
+                lock_file_path.unlink()
+                
+            pid = os.getpid()
+            logging.info(f"PROCESS_LOCK: Released lock - PID: {pid}")
+        except Exception as e:
+            logging.error(f"PROCESS_LOCK: Error releasing lock: {e}")
+
 async def main():
     # DIAGNOSTIC: Add process and environment logging for HPC debugging
     import socket
@@ -90,6 +164,16 @@ async def main():
     parser = argparse.ArgumentParser(description="Run multi-project validation")
     parser.add_argument('--keep-checkpoint', action='store_true', help='Keep the checkpoint file after completion')
     args = parser.parse_args()
+    
+    # CRITICAL FIX: Acquire process lock BEFORE creating MultiProjectValidator
+    logging.info(f"MAIN_CHECKPOINT_LOCK: About to acquire process lock - PID={pid}")
+    lock_acquired, lock_file = acquire_process_lock()
+    
+    if not lock_acquired:
+        logging.warning(f"PROCESS_LOCK: Another process is already running, exiting - PID: {pid}")
+        return 1  # Exit gracefully
+    
+    logging.info(f"MAIN_CHECKPOINT_LOCK_SUCCESS: Process lock acquired - PID={pid}")
 
     logging.info("Test log message")
     print("test message")
@@ -129,27 +213,32 @@ async def main():
     # DIAGNOSTIC: Add checkpoint after creating MultiProjectValidator
     logging.info(f"MAIN_CHECKPOINT_3: Created MultiProjectValidator - PID={pid}")
 
-    async with manage_checkpoint(checkpoint_path, args.keep_checkpoint) as (save_complete_event, cleanup_event):
-        try:
-            # DIAGNOSTIC: Add checkpoint before calling run() - this is where process lock should be
-            logging.info(f"MAIN_CHECKPOINT_4: About to call multi_validator.run() - PID={pid}")
-            await multi_validator.run(output_dir)
-            # DIAGNOSTIC: Add checkpoint after calling run()
-            logging.info(f"MAIN_CHECKPOINT_5: Completed multi_validator.run() - PID={pid}")
-            # Wait for the writing to complete
-            await multi_validator.writing_complete.wait()
-            # Now safe to call save_pickle
-            await async_save_pickle(checkpoint_path, save_complete_event)
-            # Wait for save_pickle to complete
-            await save_complete_event.wait()
-        except Exception as e:
-            logging.error(f"An error occurred during main execution: {e}")
-            logging.error(traceback.format_exc())
-            # Don't set cleanup_event, so checkpoint won't be deleted
-            return 1  # Indicate error
+    try:
+        async with manage_checkpoint(checkpoint_path, args.keep_checkpoint) as (save_complete_event, cleanup_event):
+            try:
+                # DIAGNOSTIC: Add checkpoint before calling run() - this is where process lock should be
+                logging.info(f"MAIN_CHECKPOINT_4: About to call multi_validator.run() - PID={pid}")
+                await multi_validator.run(output_dir)
+                # DIAGNOSTIC: Add checkpoint after calling run()
+                logging.info(f"MAIN_CHECKPOINT_5: Completed multi_validator.run() - PID={pid}")
+                # Wait for the writing to complete
+                await multi_validator.writing_complete.wait()
+                # Now safe to call save_pickle
+                await async_save_pickle(checkpoint_path, save_complete_event)
+                # Wait for save_pickle to complete
+                await save_complete_event.wait()
+            except Exception as e:
+                logging.error(f"An error occurred during main execution: {e}")
+                logging.error(traceback.format_exc())
+                # Don't set cleanup_event, so checkpoint won't be deleted
+                return 1  # Indicate error
 
-    logging.info("Main process completed successfully.")
-    return 0  # Indicate successful completion
+        logging.info("Main process completed successfully.")
+        return 0  # Indicate successful completion
+        
+    finally:
+        # CRITICAL: Always release the process lock
+        release_process_lock(lock_file)
 
 if __name__ == "__main__":
     try:

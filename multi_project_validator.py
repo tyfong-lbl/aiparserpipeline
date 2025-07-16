@@ -301,11 +301,6 @@ class MultiProjectValidator:
         import os
         pid = os.getpid()
         
-        # Try to acquire process lock
-        if not self._acquire_process_lock():
-            self.logger.warning(f"PROCESS_LOCK: Another process is already running, exiting - PID: {pid}")
-            return
-        
         try:
             self.logger.info("Starting multi-project validation process.")
             await self.initialize()
@@ -318,5 +313,4 @@ class MultiProjectValidator:
             #checkpoint_path = self._get_checkpoint_path()
             #if checkpoint_path.exists():
         finally:
-            # Always release the lock
-            self._release_process_lock()
+            pass
