@@ -4,6 +4,8 @@ import logging
 import os
 import pickle
 import traceback
+import fcntl
+import time
 
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +59,11 @@ class MultiProjectValidator:
 
         self._load_excel_data()
         self._setup_common_params()
+        
+        # Add process lock to prevent race conditions
+        self.lock_file_path = self.checkpoint_dir / "process.lock"
+        self.lock_file = None
+        
         self._load_checkpoint()
 
         self.writing_complete = asyncio.Event()
@@ -90,6 +97,58 @@ class MultiProjectValidator:
 
     def _get_checkpoint_path(self):
         return self.checkpoint_dir / "checkpoint.pkl"
+    
+    def _acquire_process_lock(self):
+        """Acquire a file lock to prevent multiple processes from running simultaneously."""
+        import os
+        pid = os.getpid()
+        
+        try:
+            self.checkpoint_dir.mkdir(exist_ok=True)
+            self.lock_file = open(self.lock_file_path, 'w')
+            
+            # Try to acquire exclusive lock (non-blocking)
+            fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            
+            # Write PID to lock file for debugging
+            self.lock_file.write(f"{pid}\n{time.time()}\n")
+            self.lock_file.flush()
+            
+            self.logger.info(f"PROCESS_LOCK: Acquired lock - PID: {pid}")
+            return True
+            
+        except (IOError, OSError) as e:
+            if self.lock_file:
+                self.lock_file.close()
+                self.lock_file = None
+            
+            # Try to read existing lock info
+            try:
+                with open(self.lock_file_path, 'r') as f:
+                    existing_pid = f.readline().strip()
+                    existing_time = f.readline().strip()
+                self.logger.warning(f"PROCESS_LOCK: Failed to acquire lock - PID: {pid}, Existing PID: {existing_pid}, Time: {existing_time}")
+            except:
+                self.logger.warning(f"PROCESS_LOCK: Failed to acquire lock - PID: {pid}, Error: {e}")
+            
+            return False
+    
+    def _release_process_lock(self):
+        """Release the process lock."""
+        if self.lock_file:
+            try:
+                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
+                self.lock_file.close()
+                self.lock_file = None
+                
+                # Remove lock file
+                if self.lock_file_path.exists():
+                    self.lock_file_path.unlink()
+                
+                pid = os.getpid()
+                self.logger.info(f"PROCESS_LOCK: Released lock - PID: {pid}")
+            except Exception as e:
+                self.logger.error(f"PROCESS_LOCK: Error releasing lock: {e}")
 
     async def _save_checkpoint(self):
         """Save the current state to a checkpoint file."""
@@ -103,14 +162,30 @@ class MultiProjectValidator:
 
     def _load_checkpoint(self):
         """Load the state from a checkpoint file if it exists."""
+        import os
+        pid = os.getpid()
         checkpoint_path = self._get_checkpoint_path()
+        
+        self.logger.info(f"CHECKPOINT_LOAD: Checking for checkpoint at {checkpoint_path} - PID: {pid}")
+        
         if checkpoint_path.exists():
-            with open(checkpoint_path, 'rb') as f:
-                self.project_outputs= pickle.load(f)
-            self.completed_projects = set(self.project_outputs.keys())
-            self.logger.info(f"Checkpoint loaded. Resuming with {len(self.completed_projects)} completed projects")
+            try:
+                # Add file stats for debugging
+                stat_info = checkpoint_path.stat()
+                self.logger.info(f"CHECKPOINT_LOAD: Found checkpoint file, size: {stat_info.st_size}, mtime: {stat_info.st_mtime} - PID: {pid}")
+                
+                with open(checkpoint_path, 'rb') as f:
+                    self.project_outputs = pickle.load(f)
+                self.completed_projects = set(self.project_outputs.keys())
+                self.logger.info(f"CHECKPOINT_LOAD: Loaded checkpoint with {len(self.completed_projects)} completed projects: {list(self.completed_projects)} - PID: {pid}")
+            except Exception as e:
+                self.logger.error(f"CHECKPOINT_LOAD: Error loading checkpoint - PID: {pid}, Error: {e}")
+                self.project_outputs = {}
+                self.completed_projects = set()
         else:
-            self.logger.info("No checkpoint found. Starting from the beginning.")
+            self.logger.info(f"CHECKPOINT_LOAD: No checkpoint found. Starting from the beginning - PID: {pid}")
+            self.project_outputs = {}
+            self.completed_projects = set()
 
     async def process_project(self, project_name: str) -> pd.DataFrame:
         """Process a single project."""
@@ -204,13 +279,25 @@ class MultiProjectValidator:
 
     async def run(self, output_dir: Path):
         """Main method to run the entire process."""
-        self.logger.info("Starting multi-project validation process.")
-        await self.initialize()
-        results = await self.process_all_projects()
-        if results.empty:
-            self.logger.info("No new results to save.")
-        self.logger.info("Multi-project validation process completed.")
-        self.writing_complete.set()
-        # Clean up checkpoint after successful completion
-        #checkpoint_path = self._get_checkpoint_path()
-        #if checkpoint_path.exists():
+        import os
+        pid = os.getpid()
+        
+        # Try to acquire process lock
+        if not self._acquire_process_lock():
+            self.logger.warning(f"PROCESS_LOCK: Another process is already running, exiting - PID: {pid}")
+            return
+        
+        try:
+            self.logger.info("Starting multi-project validation process.")
+            await self.initialize()
+            results = await self.process_all_projects()
+            if results.empty:
+                self.logger.info("No new results to save.")
+            self.logger.info("Multi-project validation process completed.")
+            self.writing_complete.set()
+            # Clean up checkpoint after successful completion
+            #checkpoint_path = self._get_checkpoint_path()
+            #if checkpoint_path.exists():
+        finally:
+            # Always release the lock
+            self._release_process_lock()

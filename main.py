@@ -70,6 +70,20 @@ async def manage_checkpoint(checkpoint_path, keep_checkpoint):
         await cleanup_task
 
 async def main():
+    # DIAGNOSTIC: Add process and environment logging for HPC debugging
+    import socket
+    import time
+    pid = os.getpid()
+    ppid = os.getppid()
+    hostname = socket.gethostname()
+    start_time = time.time()
+    
+    logging.info(f"MAIN_START: PID={pid}, PPID={ppid}, HOST={hostname}, TIME={start_time}")
+    logging.info(f"MAIN_ARGS: {sys.argv}")
+    logging.info(f"MAIN_ENV_SLURM: SLURM_JOB_ID={os.environ.get('SLURM_JOB_ID')}, SLURM_ARRAY_TASK_ID={os.environ.get('SLURM_ARRAY_TASK_ID')}")
+    logging.info(f"MAIN_ENV_PBS: PBS_JOBID={os.environ.get('PBS_JOBID')}, PBS_ARRAYID={os.environ.get('PBS_ARRAYID')}")
+    logging.info(f"MAIN_CWD: {os.getcwd()}")
+    
     parser = argparse.ArgumentParser(description="Run multi-project validation")
     parser.add_argument('--keep-checkpoint', action='store_true', help='Keep the checkpoint file after completion')
     args = parser.parse_args()
