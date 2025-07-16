@@ -80,29 +80,39 @@ def main():
     queries = [str.lower(i) for i in queries]
     
     #Execute web queries
-    #### ** currently running on a subset for testing!
-    df = request_all_queries(projects[0:1], queries[0:2], verbose=True, token=apikey)
+    df = request_all_queries(projects, queries, par_njobs=1, verbose=False, token=apikey, checkpt_ix=4300)
 
     #Save results
     datetime_str = datetime.now().strftime('%Y-%m-%d-%H%M')
     df.to_csv(f".\\kagi_test\\results\\urlID_output_{datetime_str}.csv")
 
-def request_all_queries(projectdf, query_template_list, par_njobs=1,verbose=False, url='https://kagi.com/api/v0/search', token=os.environ.get('KAGI_API_KEY')):
+def request_all_queries(projectdf, query_template_list, par_njobs=1,verbose=False, url='https://kagi.com/api/v0/search', token=os.environ.get('KAGI_API_KEY'), checkpt_ix=0):
     df = generate_formatted_queries(projectdf, query_template_list)
     if par_njobs>1:
-        idx=tqdm(df.index.list)
+        raise Exception("Don't recommend current parallel functionality due to lack of saving checkpoints")
+        # idx=tqdm(df.index.to_list())
+        # # response_dfs = Parallel(n_jobs=par_njobs, return_as='list')(
+        # #                         delayed(dummy_api_query)(df.loc[i,'formatted_query']) for i in idx
+        # #                     )
         # response_dfs = Parallel(n_jobs=par_njobs, return_as='list')(
-        #                         delayed(dummy_api_query)(df.loc[i,'formatted_query']) for i in idx
-        #                     )
-        response_dfs = Parallel(n_jobs=par_njobs, return_as='list')(
-            delayed(api_query_single)(df.loc[i,'formatted_query'], verbose, url, token) for i in idx
-        )
-        responses_concat = pd.concat(response_dfs)
-        responses_concat.to_csv("url_id_raw_responses.csv")
-        df = df.merge(responses_concat, how='left', on='formatted_query', validate='1:m')
+        #     delayed(api_query_single)(df.loc[i,'formatted_query'], verbose, url, token) for i in idx
+        # )
+        # responses_concat = pd.concat([response_dfs[i][0] for i in range(len(response_dfs))])
+        # responses_concat.to_csv("url_id_raw_responses.csv")
+        # df = df.merge(responses_concat, how='left', on='formatted_query', validate='1:m')
     else:
-        responses = pd.concat([api_query_single(df.loc[i,'formatted_query'], verbose, url, token)[0] for i in df.index])
-        df = df.merge(responses, how='left', on='formatted_query', validate='1:m')
+        responses = []
+        if checkpt_ix>0:
+            checkpt_df = pd.read_csv(".\\kagi_test\\results\\responses_checkpoint_"+str(checkpt_ix)+".csv", index_col=0)
+        for i in df.index.difference(range(checkpt_ix)):
+            responses = responses + [api_query_single(df.loc[i,'formatted_query'], verbose, url, token)[0]]#[dummy_api_query(df.loc[i,'formatted_query'])]
+            if (i % 100 ==0) & (i>0):
+                if checkpt_ix>0:
+                    pd.concat([checkpt_df, pd.concat(responses)]).to_csv(".\\kagi_test\\results\\responses_checkpoint_"+str(i)+".csv")
+                else:
+                    pd.concat(responses).to_csv(".\\kagi_test\\results\\responses_checkpoint_"+str(i)+".csv")
+            # responses = pd.concat([api_query_single(df.loc[i,'formatted_query'], verbose, url, token)[0] for i in df.index])
+        df = df.merge(pd.concat([checkpt_df, pd.concat(responses)]), how='left', on='formatted_query', validate='1:m')
     return df
 
 def generate_formatted_queries(projects, queries):
@@ -135,21 +145,27 @@ def api_query_single(query, verbose=False, url='https://kagi.com/api/v0/search',
     params = {
         'q': f'{query}'  # Search query parameter
     }
+    try:
+        # Make the API request
+        response = requests.get(url, headers=headers, params=params)
+        if verbose:
+            # Print response details (optional)
+            print(query)
+            print(f'Status code: {response.status_code}')
+            # print('Response content:')
+            # print(response.text)
 
-    # Make the API request
-    response = requests.get(url, headers=headers, params=params)
-    if verbose:
-        # Print response details (optional)
-        print(query)
-        print(f'Status code: {response.status_code}')
-        print('Response content:')
-        print(response.text)
-
-    data = json.loads(response.text)
-    df = pd.DataFrame(data['data'])
-    df.insert(0,"formatted_query",[query] * len(df.index))
+        data = json.loads(response.text)
+        df = pd.DataFrame(data['data'])
+        df.insert(0,"formatted_query",[query] * len(df.index))
+    except Exception as err:
+        print(f"{query} resulted in unexpected error: {err}")
+        df = pd.DataFrame({'formatted_query':query, 'url':err, 'title':"API REQUEST FAILED", 'snippet':"API REQUEST FAILED"})
     # Get rid of the related search row
-    df_cleaned = df.dropna(subset=['url'])
+    if "url" in df.columns:
+        df_cleaned = df.dropna(subset=['url'])
+    else: 
+        df_cleaned=df
     return df_cleaned, response.status_code
 
 def dummy_api_query(query):
