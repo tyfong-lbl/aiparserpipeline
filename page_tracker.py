@@ -19,6 +19,17 @@ from playwright.async_api import async_playwright
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Ensure diagnostic logging goes to a specific file
+if not logger.handlers:
+    diagnostic_handler = logging.FileHandler('diagnostic_output.log')
+    diagnostic_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    diagnostic_handler.setFormatter(diagnostic_formatter)
+    logger.addHandler(diagnostic_handler)
+    # Also add console output
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(diagnostic_formatter)
+    logger.addHandler(console_handler)
+
 class AiParser:
     def __init__(self,
                  api_key:str,
@@ -365,8 +376,19 @@ class ModelValidator:
         """
         For a particular URL, get all the responses to prompts
         """
+        import os
+        process_id = os.getpid()
+        task_id = id(asyncio.current_task()) if asyncio.current_task() else "NO_TASK"
+        
+        # DIAGNOSTIC: Log URL processing start
+        logger.info(f"DIAGNOSTIC: Starting get_responses_for_url for {url} in project {self.project_name} - PID: {process_id}, Task ID: {task_id}")
+        
         prompts = self.get_all_prompts()
         responses = []
+        
+        # DIAGNOSTIC: Log prompt count
+        logger.info(f"DIAGNOSTIC: Processing {len(prompts)} prompts for URL {url} - PID: {process_id}")
+        
         ai_parser = AiParser(api_key=self.api_key,
                              api_url=self.api_url,
                              model=self.model,
@@ -375,15 +397,20 @@ class ModelValidator:
                              pipeline_logger=self.pipeline_logger)
         try:
             await ai_parser.initialize()
-            for prompt in prompts:
+            for i, prompt in enumerate(prompts):
+                # DIAGNOSTIC: Log each prompt processing
+                logger.info(f"DIAGNOSTIC: Processing prompt {i+1}/{len(prompts)} for URL {url} - PID: {process_id}")
                 ai_parser.prompt = prompt
-                article_data = await ai_parser.select_article_to_api(url=url, 
+                article_data = await ai_parser.select_article_to_api(url=url,
                                                                  include_url=True,
                                                                  avg_pause=1)
                 responses.append(article_data)
         
         finally:
             await ai_parser.cleanup()
+            
+        # DIAGNOSTIC: Log completion
+        logger.info(f"DIAGNOSTIC: Completed get_responses_for_url for {url}, got {len(responses)} responses - PID: {process_id}")
         return responses
     
     @staticmethod
