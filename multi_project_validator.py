@@ -103,6 +103,25 @@ class MultiProjectValidator:
         import os
         pid = os.getpid()
         
+        # Check for stale lock file first
+        if self.lock_file_path.exists():
+            try:
+                with open(self.lock_file_path, 'r') as f:
+                    existing_pid = f.readline().strip()
+                    existing_time = float(f.readline().strip())
+                
+                # Check if the process is still running
+                try:
+                    os.kill(int(existing_pid), 0)  # Signal 0 just checks existence
+                    age = time.time() - existing_time
+                    self.logger.info(f"PROCESS_LOCK: Active lock found - PID: {existing_pid}, Age: {age:.1f}s")
+                except (OSError, ValueError):
+                    # Process no longer exists, remove stale lock
+                    self.lock_file_path.unlink()
+                    self.logger.info(f"PROCESS_LOCK: Removed stale lock from PID: {existing_pid}")
+            except Exception as e:
+                self.logger.warning(f"PROCESS_LOCK: Error checking existing lock: {e}")
+        
         try:
             self.checkpoint_dir.mkdir(exist_ok=True)
             self.lock_file = open(self.lock_file_path, 'w')
