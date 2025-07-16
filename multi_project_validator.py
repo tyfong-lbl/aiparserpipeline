@@ -60,10 +60,6 @@ class MultiProjectValidator:
         self._load_excel_data()
         self._setup_common_params()
         
-        # Add process lock to prevent race conditions
-        self.lock_file_path = self.checkpoint_dir / "process.lock"
-        self.lock_file = None
-        
         self._load_checkpoint()
 
         self.writing_complete = asyncio.Event()
@@ -98,76 +94,6 @@ class MultiProjectValidator:
     def _get_checkpoint_path(self):
         return self.checkpoint_dir / "checkpoint.pkl"
     
-    def _acquire_process_lock(self):
-        """Acquire a file lock to prevent multiple processes from running simultaneously."""
-        import os
-        pid = os.getpid()
-        
-        # Check for stale lock file first
-        if self.lock_file_path.exists():
-            try:
-                with open(self.lock_file_path, 'r') as f:
-                    existing_pid = f.readline().strip()
-                    existing_time = float(f.readline().strip())
-                
-                # Check if the process is still running
-                try:
-                    os.kill(int(existing_pid), 0)  # Signal 0 just checks existence
-                    age = time.time() - existing_time
-                    self.logger.info(f"PROCESS_LOCK: Active lock found - PID: {existing_pid}, Age: {age:.1f}s")
-                except (OSError, ValueError):
-                    # Process no longer exists, remove stale lock
-                    self.lock_file_path.unlink()
-                    self.logger.info(f"PROCESS_LOCK: Removed stale lock from PID: {existing_pid}")
-            except Exception as e:
-                self.logger.warning(f"PROCESS_LOCK: Error checking existing lock: {e}")
-        
-        try:
-            self.checkpoint_dir.mkdir(exist_ok=True)
-            self.lock_file = open(self.lock_file_path, 'w')
-            
-            # Try to acquire exclusive lock (non-blocking)
-            fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            
-            # Write PID to lock file for debugging
-            self.lock_file.write(f"{pid}\n{time.time()}\n")
-            self.lock_file.flush()
-            
-            self.logger.info(f"PROCESS_LOCK: Acquired lock - PID: {pid}")
-            return True
-            
-        except (IOError, OSError) as e:
-            if self.lock_file:
-                self.lock_file.close()
-                self.lock_file = None
-            
-            # Try to read existing lock info
-            try:
-                with open(self.lock_file_path, 'r') as f:
-                    existing_pid = f.readline().strip()
-                    existing_time = f.readline().strip()
-                self.logger.warning(f"PROCESS_LOCK: Failed to acquire lock - PID: {pid}, Existing PID: {existing_pid}, Time: {existing_time}")
-            except:
-                self.logger.warning(f"PROCESS_LOCK: Failed to acquire lock - PID: {pid}, Error: {e}")
-            
-            return False
-    
-    def _release_process_lock(self):
-        """Release the process lock."""
-        if self.lock_file:
-            try:
-                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
-                self.lock_file.close()
-                self.lock_file = None
-                
-                # Remove lock file
-                if self.lock_file_path.exists():
-                    self.lock_file_path.unlink()
-                
-                pid = os.getpid()
-                self.logger.info(f"PROCESS_LOCK: Released lock - PID: {pid}")
-            except Exception as e:
-                self.logger.error(f"PROCESS_LOCK: Error releasing lock: {e}")
 
     async def _save_checkpoint(self):
         """Save the current state to a checkpoint file."""

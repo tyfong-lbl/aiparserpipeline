@@ -77,53 +77,58 @@ def acquire_process_lock():
     pid = os.getpid()
     
     try:
-        # Check if lock file exists and if the process is still running
-        if lock_file_path.exists():
-            try:
-                with open(lock_file_path, 'r') as f:
-                    existing_pid = int(f.readline().strip())
-                    existing_time = f.readline().strip()
-                
-                # Check if the process is still running
-                try:
-                    os.kill(existing_pid, 0)  # Signal 0 checks if process exists
-                    age = time.time() - float(existing_time)
-                    logging.info(f"PROCESS_LOCK: Active lock found - PID: {existing_pid}, Age: {age:.1f}s")
-                    return False, None
-                except (OSError, ProcessLookupError):
-                    # Process doesn't exist, remove stale lock
-                    lock_file_path.unlink()
-                    logging.info(f"PROCESS_LOCK: Removed stale lock from PID: {existing_pid}")
-            except Exception as e:
-                logging.warning(f"PROCESS_LOCK: Error checking existing lock: {e}")
+        # CRITICAL FIX: Use atomic file creation with exclusive lock
+        # This prevents the race condition where multiple processes
+        # can both see no lock file and both create one
         
-        # Try to acquire exclusive lock
-        lock_file = open(lock_file_path, 'w')
+        logging.info(f"PROCESS_LOCK: Attempting to acquire lock - PID: {pid}")
+        
+        # Create lock file with exclusive access - this is atomic
+        lock_file = open(lock_file_path, 'x')  # 'x' mode fails if file exists
+        
         try:
-            # Try to acquire exclusive lock (non-blocking)
+            # Acquire exclusive lock on the file descriptor
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             
             # Write PID and timestamp to lock file
             lock_file.write(f"{pid}\n{time.time()}\n")
             lock_file.flush()
             
-            logging.info(f"PROCESS_LOCK: Acquired lock - PID: {pid}")
+            logging.info(f"PROCESS_LOCK: Successfully acquired lock - PID: {pid}")
             return True, lock_file
             
-        except BlockingIOError:
+        except (BlockingIOError, OSError) as e:
             # Lock is held by another process
             lock_file.close()
+            logging.warning(f"PROCESS_LOCK: Failed to acquire lock - PID: {pid}, Error: {e}")
+            return False, None
+            
+    except FileExistsError:
+        # Lock file already exists - check if process is still running
+        try:
+            with open(lock_file_path, 'r') as f:
+                existing_pid = int(f.readline().strip())
+                existing_time = float(f.readline().strip())
+            
+            # Check if the process is still running
             try:
-                with open(lock_file_path, 'r') as f:
-                    existing_pid = f.readline().strip()
-                    existing_time = f.readline().strip()
-                logging.warning(f"PROCESS_LOCK: Failed to acquire lock - PID: {pid}, Existing PID: {existing_pid}, Time: {existing_time}")
-            except:
-                logging.warning(f"PROCESS_LOCK: Failed to acquire lock - PID: {pid}")
+                os.kill(existing_pid, 0)  # Signal 0 checks if process exists
+                age = time.time() - existing_time
+                logging.info(f"PROCESS_LOCK: Active lock found - PID: {existing_pid}, Age: {age:.1f}s")
+                return False, None
+            except (OSError, ProcessLookupError):
+                # Process doesn't exist, remove stale lock and retry
+                lock_file_path.unlink()
+                logging.info(f"PROCESS_LOCK: Removed stale lock from PID: {existing_pid}, retrying...")
+                # Recursive call to retry after removing stale lock
+                return acquire_process_lock()
+                
+        except Exception as e:
+            logging.warning(f"PROCESS_LOCK: Error checking existing lock: {e}")
             return False, None
             
     except Exception as e:
-        logging.error(f"PROCESS_LOCK: Error acquiring lock: {e}")
+        logging.error(f"PROCESS_LOCK: Unexpected error acquiring lock: {e}")
         return False, None
 
 def release_process_lock(lock_file):
