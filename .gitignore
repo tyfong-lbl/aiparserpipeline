@@ -170,6 +170,7 @@ cython_debug/
 # database files
 *.db
 *.csv
+*.xlsx
 /groundtruth
 /checkpoints
 
