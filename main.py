@@ -84,6 +84,9 @@ async def main():
     logging.info(f"MAIN_ENV_PBS: PBS_JOBID={os.environ.get('PBS_JOBID')}, PBS_ARRAYID={os.environ.get('PBS_ARRAYID')}")
     logging.info(f"MAIN_CWD: {os.getcwd()}")
     
+    # DIAGNOSTIC: Add checkpoint to confirm this is where duplication occurs
+    logging.info(f"MAIN_CHECKPOINT_1: About to parse arguments - PID={pid}")
+    
     parser = argparse.ArgumentParser(description="Run multi-project validation")
     parser.add_argument('--keep-checkpoint', action='store_true', help='Keep the checkpoint file after completion')
     args = parser.parse_args()
@@ -110,6 +113,9 @@ async def main():
     pipeline_logs_dir = Path(__file__).resolve().parent / 'pipeline_logs'
     logger = PipelineLogger(pipeline_logs_dir)
     
+    # DIAGNOSTIC: Add checkpoint before creating MultiProjectValidator
+    logging.info(f"MAIN_CHECKPOINT_2: About to create MultiProjectValidator - PID={pid}")
+    
     multi_validator = MultiProjectValidator(
         excel_path=excel_path,
         api_key=api_key,
@@ -119,10 +125,17 @@ async def main():
         checkpoint_dir=checkpoint_dir,
         logger=logger
     )
+    
+    # DIAGNOSTIC: Add checkpoint after creating MultiProjectValidator
+    logging.info(f"MAIN_CHECKPOINT_3: Created MultiProjectValidator - PID={pid}")
 
     async with manage_checkpoint(checkpoint_path, args.keep_checkpoint) as (save_complete_event, cleanup_event):
         try:
+            # DIAGNOSTIC: Add checkpoint before calling run() - this is where process lock should be
+            logging.info(f"MAIN_CHECKPOINT_4: About to call multi_validator.run() - PID={pid}")
             await multi_validator.run(output_dir)
+            # DIAGNOSTIC: Add checkpoint after calling run()
+            logging.info(f"MAIN_CHECKPOINT_5: Completed multi_validator.run() - PID={pid}")
             # Wait for the writing to complete
             await multi_validator.writing_complete.wait()
             # Now safe to call save_pickle
