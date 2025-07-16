@@ -436,10 +436,14 @@ class ModelValidator:
                 logger.warning(f"No response for URL: {url[0]}")
     
         return responses
+    # ORIGINAL PROBLEMATIC IMPLEMENTATION (DO NOT USE):
+    # This concurrent approach caused race conditions on HPC systems:
     #async def get_all_url_responses(self) -> dict:
     #    urls = [url for url in self.url_df.apply(self.extract_urls).dropna()]
     #    responses = [await self.get_responses_for_url(url[0]) for url in tqdm(urls, desc="Getting responses for URLs")]
     #    return responses
+    # ISSUE: List comprehension with await creates all tasks simultaneously,
+    # causing browser instance conflicts and resource contention on multi-core systems
 
 
     def flatten_dict(self, input_dict)->list:
