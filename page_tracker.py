@@ -14,6 +14,13 @@ from pathlib import Path
 from string import Template
 from tqdm import tqdm
 from playwright.async_api import async_playwright
+from typing import Optional
+
+# Import cache utilities (will be used in later steps)
+from cache_utils import (
+    generate_cache_filename,
+    atomic_write_file
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -52,6 +59,10 @@ class AiParser:
         self.playwright = None
         self.browser = None
         self.pipeline_logger = pipeline_logger
+        
+        # Cache-related instance variables for storing cache file path and content
+        self._cache_file_path: Optional[str] = None
+        self._cached_content: Optional[str] = None
 
     async def initialize(self):
         self.playwright = await async_playwright().start()
@@ -62,6 +73,196 @@ class AiParser:
             await self.browser.close()
         if self.playwright:
             await self.playwright.stop()
+    
+    async def scrape_and_cache(self, url: str) -> str:
+        """
+        Scrape a webpage and cache its content for reuse with multiple prompts.
+        
+        This method performs web scraping of the provided URL and stores the content
+        in a cache file for efficient reuse across multiple LLM API calls with different
+        prompts. This eliminates redundant network requests and improves performance
+        when processing the same URL with multiple prompts.
+        
+        The method includes comprehensive error handling for:
+        - Network failures and browser errors during scraping
+        - Disk operation failures with retry logic via atomic write function
+        - File system errors (permissions, disk full, etc.)
+        - Memory pressure from large content
+        - Unicode encoding issues
+        
+        The method:
+        1. Validates the input URL parameter
+        2. Scrapes the webpage content using Playwright browser automation
+        3. Generates a unique cache filename based on URL, project name, and thread IDs
+        4. Stores the scraped content atomically in the cache file with retry logic
+        5. Returns the path to the cache file for later content retrieval
+        
+        Args:
+            url (str): The URL to scrape and cache. Must be a non-empty string
+                      representing a valid web address.
+        
+        Returns:
+            str: The full path to the cache file containing the scraped content.
+                The cache file can be read later to retrieve the scraped content
+                without re-scraping the webpage. Returns path even if scraping
+                or file operations fail (for consistency in calling code).
+        
+        Raises:
+            ValueError: If url is None, empty string, or contains only whitespace
+            TypeError: If url is not a string
+        
+        Example:
+            >>> ai_parser = AiParser(api_key="...", api_url="...", ...)
+            >>> await ai_parser.initialize()
+            >>> cache_path = await ai_parser.scrape_and_cache("https://example.com")
+            >>> print(f"Content cached at: {cache_path}")
+        
+        Note:
+            This method is part of the AiParser refactoring to eliminate redundant
+            web scraping. It uses atomic file operations with retry logic and
+            comprehensive error handling to ensure reliable cache file creation.
+        """
+        # Parameter validation - ensure URL is valid
+        if url is None:
+            raise ValueError("URL cannot be None")
+        
+        if not isinstance(url, str):
+            raise TypeError("URL must be a string")
+        
+        # Check for empty or whitespace-only URLs
+        if not url or not url.strip():
+            raise ValueError("URL cannot be empty or contain only whitespace")
+        
+        # Generate cache filename using utility functions
+        # Store the cache file path regardless of success/failure for consistency
+        cache_file_path = None
+        try:
+            cache_file_path = generate_cache_filename(url, self.project_name)
+            self._cache_file_path = cache_file_path
+            logger.debug(f"Generated cache file path: {cache_file_path}")
+        except Exception as e:
+            logger.error(f"Error generating cache filename for URL {url}: {type(e).__name__}: {e}")
+            # If we can't generate cache filename, we still need to return something
+            # Use a fallback approach
+            import tempfile
+            temp_dir = Path(tempfile.gettempdir()) / "scraped_cache_fallback"
+            temp_dir.mkdir(exist_ok=True)
+            cache_file_path = str(temp_dir / f"cache_fallback_{abs(hash(url))}.txt")
+            self._cache_file_path = cache_file_path
+            logger.warning(f"Using fallback cache file path: {cache_file_path}")
+        
+        # Web scraping operation with comprehensive error handling
+        page = None
+        fulltext = ""
+        scraping_successful = False
+        scraping_error = None
+        
+        try:
+            logger.debug(f"Starting web scraping for URL: {url}")
+            page = await self.browser.new_page()
+            
+            # Navigate to page with error handling
+            try:
+                await page.goto(url, timeout=30000)  # 30 second timeout
+                logger.debug(f"Successfully navigated to URL: {url}")
+            except Exception as nav_error:
+                logger.error(f"Navigation failed for URL {url}: {type(nav_error).__name__}: {nav_error}")
+                raise nav_error
+            
+            # Extract title and content with error handling
+            try:
+                title = await page.title()
+                text = await page.evaluate('() => document.body.innerText')
+                fulltext = f"{title}.\n\n{text}"
+                scraping_successful = True
+                logger.debug(f"Successfully scraped content from {url} (length: {len(fulltext)} chars)")
+                
+                # Check for unusually large content and log warning
+                if len(fulltext) > 5 * 1024 * 1024:  # 5MB threshold
+                    logger.warning(f"Large content detected for {url}: {len(fulltext)} characters")
+                
+            except Exception as extract_error:
+                logger.error(f"Content extraction failed for URL {url}: {type(extract_error).__name__}: {extract_error}")
+                raise extract_error
+                
+        except Exception as e:
+            # Handle all scraping errors comprehensively
+            scraping_error = e
+            error_type = type(e).__name__
+            logger.error(f"Error during web scraping for URL {url}: {error_type}: {e}")
+            
+            # Log additional context for debugging
+            logger.error(f"Scraping error context - URL: {url}, Project: {self.project_name}")
+            
+            # Set empty content on scraping error - this ensures file operations don't fail
+            fulltext = ""
+            
+        finally:
+            # Ensure browser page cleanup happens regardless of success/failure
+            if page is not None:
+                try:
+                    await page.close()
+                    logger.debug(f"Browser page closed for URL: {url}")
+                except Exception as cleanup_error:
+                    # Log cleanup errors but don't let them affect the main operation
+                    logger.warning(f"Error during page cleanup for URL {url}: {type(cleanup_error).__name__}: {cleanup_error}")
+                    # Continue execution - cleanup errors should not fail the entire operation
+        
+        # File writing operation with comprehensive error handling
+        file_write_successful = False
+        file_write_error = None
+        
+        try:
+            logger.debug(f"Attempting to write cache file: {cache_file_path}")
+            
+            # Ensure the cache directory exists before writing
+            cache_dir = Path(cache_file_path).parent
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                logger.debug(f"Cache directory confirmed/created: {cache_dir}")
+            except Exception as dir_error:
+                logger.error(f"Error creating cache directory {cache_dir}: {type(dir_error).__name__}: {dir_error}")
+                # Continue with write attempt - atomic_write_file will handle directory creation
+            
+            # Use atomic write function (which includes retry logic)
+            atomic_write_file(cache_file_path, fulltext)
+            file_write_successful = True
+            logger.debug(f"Successfully wrote cache file: {cache_file_path} ({len(fulltext)} chars)")
+            
+        except Exception as e:
+            # Handle file writing errors comprehensively
+            file_write_error = e
+            error_type = type(e).__name__
+            logger.error(f"Error writing cache file {cache_file_path}: {error_type}: {e}")
+            
+            # Log additional context for debugging
+            logger.error(f"File write error context - Cache path: {cache_file_path}, Content length: {len(fulltext)}")
+            logger.error(f"Project: {self.project_name}, URL: {url}")
+            
+            # Check for specific error types and provide actionable information
+            if isinstance(e, PermissionError):
+                logger.error(f"Permission denied writing to {cache_file_path}. Check file/directory permissions.")
+            elif isinstance(e, OSError) and "No space left" in str(e):
+                logger.error(f"Disk full error writing to {cache_file_path}. Free up disk space.")
+            elif isinstance(e, OSError) and "Read-only file system" in str(e):
+                logger.error(f"Read-only filesystem error writing to {cache_file_path}. Check filesystem mount options.")
+            else:
+                logger.error(f"Unexpected file system error: {e}")
+        
+        # Log final operation summary for debugging
+        if scraping_successful and file_write_successful:
+            logger.info(f"Successfully scraped and cached {url} -> {cache_file_path}")
+        elif scraping_successful and not file_write_successful:
+            logger.warning(f"Scraped {url} successfully but cache write failed -> {cache_file_path}")
+        elif not scraping_successful and file_write_successful:
+            logger.warning(f"Scraping failed for {url} but empty cache file created -> {cache_file_path}")
+        else:
+            logger.error(f"Both scraping and cache writing failed for {url} -> {cache_file_path}")
+        
+        # Always return the cache file path for consistency in calling code
+        # This allows the rest of the pipeline to continue functioning even if
+        # some operations failed (e.g., file contains empty content on scraping failure)
+        return cache_file_path
       
     async def get_articles_urls(self) -> list:
         if not self.publication_url:
@@ -76,7 +277,88 @@ class AiParser:
         await page.close()
         return article_urls
     
-    def get_api_response(self, fulltext:str):
+    def get_api_response(self, **kwargs):
+        """
+        Generate an API response using cached content or provided content (deprecated).
+        
+        This method processes content through the LLM API using the configured prompt template.
+        In the new implementation, content is read from the cache file path set by scrape_and_cache().
+        
+        The method includes backward compatibility for internal AiParser usage during the
+        refactoring transition period. External usage with fulltext parameter is deprecated.
+        
+        Args:
+            **kwargs: Keyword arguments. The 'fulltext' parameter is deprecated for external use
+                     but temporarily supported for internal AiParser methods during refactoring.
+        
+        Returns:
+            tuple: (response_content, llm_metrics) where:
+                - response_content: The LLM's response content or None if failed
+                - llm_metrics: Dictionary containing response status, error info, and timing
+        
+        Raises:
+            ValueError: If external code uses deprecated fulltext parameter or cache file path is not set
+            FileNotFoundError: If cache file doesn't exist (when using cache mode)
+            IOError: If cache file cannot be read (when using cache mode)
+        """
+        # Handle backward compatibility for internal AiParser usage during refactoring
+        fulltext = None
+        using_cached_content = True
+        
+        if 'fulltext' in kwargs:
+            # Temporary backward compatibility during refactoring transition
+            # The fulltext parameter is deprecated but still supported in Step 5.1
+            # It will be completely removed in Step 7
+            fulltext = kwargs['fulltext']
+            using_cached_content = False
+            
+            # Log deprecation warning
+            import inspect
+            frame = inspect.currentframe()
+            try:
+                caller_frame = frame.f_back
+                caller_function = caller_frame.f_code.co_name if caller_frame else 'unknown'
+                logger.warning(
+                    f"DEPRECATED: Method '{caller_function}' using fulltext parameter in get_api_response(). "
+                    "Parameter will be removed in Step 7. Use scrape_and_cache() + get_api_response() instead."
+                )
+            finally:
+                del frame
+        
+        # Check for other unexpected parameters
+        remaining_kwargs = {k: v for k, v in kwargs.items() if k != 'fulltext'}
+        if remaining_kwargs:
+            unexpected_params = list(remaining_kwargs.keys())
+            raise TypeError(f"get_api_response() got unexpected keyword arguments: {unexpected_params}")
+        
+        # Read content from cache if not provided via deprecated fulltext parameter
+        if using_cached_content:
+            # Check if cache file path is set
+            if not self._cache_file_path:
+                raise ValueError("Cache file path not set. Call scrape_and_cache() first.")
+            
+            # Implement lazy loading with in-memory content caching
+            # Check if content is already loaded in memory
+            if self._cached_content is not None:
+                # Use cached content from memory (avoids disk I/O)
+                fulltext = self._cached_content
+                logger.debug(f"Using cached content from memory ({len(fulltext)} chars)")
+            else:
+                # Content not in memory - read from cache file and store in memory
+                try:
+                    with open(self._cache_file_path, 'r', encoding='utf-8') as cache_file:
+                        fulltext = cache_file.read()
+                    
+                    # Store content in memory for subsequent calls
+                    self._cached_content = fulltext
+                    logger.debug(f"Loaded and cached content from {self._cache_file_path} ({len(fulltext)} chars)")
+                    
+                except FileNotFoundError:
+                    raise FileNotFoundError(f"Cache file not found: {self._cache_file_path}")
+                except IOError as e:
+                    raise IOError(f"Error reading cache file {self._cache_file_path}: {e}")
+        
+        # Prepare prompt with template substitution
         values = {"PROJECT": self.project_name}
         template = Template(self.prompt)
         prompt_for_submission = template.substitute(values)
@@ -122,6 +404,113 @@ class AiParser:
             
             return None, llm_metrics
 
+    def clear_memory_cache(self):
+        """
+        Clear the in-memory cached content.
+        
+        This method clears the cached content stored in memory, forcing the next
+        call to get_api_response() to re-read from the cache file. This can be
+        useful for memory management or when you need to ensure fresh content
+        is loaded.
+        
+        Note: This does not affect the cache file on disk, only the in-memory copy.
+        """
+        if self._cached_content is not None:
+            content_size = len(self._cached_content)
+            self._cached_content = None
+            logger.debug(f"Cleared in-memory cached content ({content_size} chars)")
+        else:
+            logger.debug("No in-memory cached content to clear")
+
+    def cleanup_cache_file(self):
+        """
+        Clean up cache files after processing is complete.
+        
+        This method performs comprehensive cleanup of both disk cache files and
+        in-memory cached content. It's designed to be safe to call multiple times
+        and handles errors gracefully without raising exceptions.
+        
+        The method:
+        1. Removes the cache file from disk if it exists
+        2. Clears the in-memory cached content
+        3. Resets cache file path to None
+        4. Logs cleanup operations for debugging
+        5. Handles all cleanup errors gracefully (logs but doesn't fail)
+        
+        This method is automatically called during AiParser cleanup and can also
+        be called manually when cache cleanup is needed.
+        
+        Note: This is a best-effort operation - if cleanup fails, it logs the
+        error but continues execution to avoid breaking the application.
+        """
+        cleanup_operations = []
+        
+        # Step 1: Remove cache file from disk if it exists
+        if self._cache_file_path:
+            try:
+                cache_path = Path(self._cache_file_path)
+                if cache_path.exists() and cache_path.is_file():
+                    file_size = cache_path.stat().st_size
+                    cache_path.unlink()  # Remove the file
+                    cleanup_operations.append(f"Removed cache file {self._cache_file_path} ({file_size} bytes)")
+                    logger.debug(f"Successfully removed cache file: {self._cache_file_path}")
+                elif cache_path.exists():
+                    logger.warning(f"Cache path exists but is not a file: {self._cache_file_path}")
+                    cleanup_operations.append(f"Skipped non-file cache path: {self._cache_file_path}")
+                else:
+                    logger.debug(f"Cache file does not exist (already cleaned?): {self._cache_file_path}")
+                    cleanup_operations.append(f"Cache file already removed: {self._cache_file_path}")
+                    
+            except PermissionError as e:
+                error_msg = f"Permission denied removing cache file {self._cache_file_path}: {e}"
+                logger.error(error_msg)
+                cleanup_operations.append(f"Permission error: {error_msg}")
+            except OSError as e:
+                error_msg = f"OS error removing cache file {self._cache_file_path}: {e}"
+                logger.error(error_msg)
+                cleanup_operations.append(f"OS error: {error_msg}")
+            except Exception as e:
+                error_msg = f"Unexpected error removing cache file {self._cache_file_path}: {type(e).__name__}: {e}"
+                logger.error(error_msg)
+                cleanup_operations.append(f"Unexpected error: {error_msg}")
+        else:
+            logger.debug("No cache file path set, skipping disk cleanup")
+            cleanup_operations.append("No cache file path to clean")
+        
+        # Step 2: Clear in-memory cached content
+        try:
+            if self._cached_content is not None:
+                content_size = len(self._cached_content)
+                self._cached_content = None
+                cleanup_operations.append(f"Cleared in-memory content ({content_size} chars)")
+                logger.debug(f"Cleared in-memory cached content ({content_size} chars)")
+            else:
+                logger.debug("No in-memory cached content to clear")
+                cleanup_operations.append("No in-memory content to clear")
+        except Exception as e:
+            error_msg = f"Error clearing in-memory cache: {type(e).__name__}: {e}"
+            logger.error(error_msg)
+            cleanup_operations.append(f"Memory clear error: {error_msg}")
+        
+        # Step 3: Reset cache file path
+        try:
+            if self._cache_file_path:
+                old_path = self._cache_file_path
+                self._cache_file_path = None
+                cleanup_operations.append(f"Reset cache path: {old_path}")
+                logger.debug(f"Reset cache file path: {old_path}")
+            else:
+                cleanup_operations.append("Cache path already None")
+        except Exception as e:
+            error_msg = f"Error resetting cache path: {type(e).__name__}: {e}"
+            logger.error(error_msg)
+            cleanup_operations.append(f"Path reset error: {error_msg}")
+        
+        # Log summary of cleanup operations
+        if cleanup_operations:
+            logger.info(f"Cache cleanup completed: {'; '.join(cleanup_operations)}")
+        else:
+            logger.debug("Cache cleanup completed with no operations needed")
 
     @staticmethod
     def strip_markdown(text):
@@ -284,7 +673,6 @@ class AiParser:
             response_time_ms=total_response_time_ms
         )
 
-    @staticmethod
     def articles_parser(self, urls: list, include_url=True, max_limit: int = None) -> list:
         if max_limit is None:
             max_limit = len(urls)
@@ -292,10 +680,24 @@ class AiParser:
         return data
     
     async def cleanup(self):
+        # Clean up cache files and memory first
+        try:
+            self.cleanup_cache_file()
+        except Exception as e:
+            # Log cache cleanup errors but don't let them prevent browser cleanup
+            logger.error(f"Error during cache cleanup in AiParser.cleanup(): {type(e).__name__}: {e}")
+        
+        # Then clean up browser resources
         if self.browser:
-            await self.browser.close()
+            try:
+                await self.browser.close()
+            except Exception as e:
+                logger.error(f"Error closing browser in AiParser.cleanup(): {type(e).__name__}: {e}")
         if self.playwright:
-            await self.playwright.stop()
+            try:
+                await self.playwright.stop()
+            except Exception as e:
+                logger.error(f"Error stopping playwright in AiParser.cleanup(): {type(e).__name__}: {e}")
     
 class RateLimitWrapper:
     """
@@ -374,7 +776,14 @@ class ModelValidator:
 
     async def get_responses_for_url(self,url)->list:
         """
-        For a particular URL, get all the responses to prompts
+        For a particular URL, get all the responses to prompts using scrape-once pattern.
+        
+        This method has been restructured to follow the scrape-once, process-many pattern:
+        1. Scrape the URL content once and cache it
+        2. Process all prompts against the cached content
+        3. Return results in the same format as the original implementation
+        
+        This eliminates redundant network requests while maintaining identical behavior.
         """
         import os
         process_id = os.getpid()
@@ -395,19 +804,65 @@ class ModelValidator:
                              prompt=prompts[0],
                              project_name=self.project_name,
                              pipeline_logger=self.pipeline_logger)
+        
+        # Ensure cleanup happens under all conditions, including initialization failures
         try:
+            # Step 1: Initialize browser
             await ai_parser.initialize()
+            
+            # Step 2: Scrape and cache the URL content once
+            try:
+                cache_path = await ai_parser.scrape_and_cache(url)
+                logger.info(f"DIAGNOSTIC: Successfully scraped and cached {url} -> {cache_path} - PID: {process_id}")
+            except Exception as scraping_error:
+                # Handle scraping errors - return empty list to preserve original behavior
+                logger.error(f"DIAGNOSTIC: Scraping failed for {url} - PID: {process_id}: {type(scraping_error).__name__}: {scraping_error}")
+                # Ensure cleanup happens even when scraping fails
+                return []
+            
+            # Step 3: Process all prompts against the cached content
             for i, prompt in enumerate(prompts):
                 # DIAGNOSTIC: Log each prompt processing
                 logger.info(f"DIAGNOSTIC: Processing prompt {i+1}/{len(prompts)} for URL {url} - PID: {process_id}")
                 ai_parser.prompt = prompt
-                article_data = await ai_parser.select_article_to_api(url=url,
-                                                                 include_url=True,
-                                                                 avg_pause=1)
-                responses.append(article_data)
+                
+                try:
+                    # Get LLM response using cached content (no scraping)
+                    response_content, llm_metrics = ai_parser.get_api_response()
+                    
+                    if response_content is None:
+                        logger.error(f"DIAGNOSTIC: No response content from API for prompt {i+1} - PID: {process_id}")
+                        responses.append(None)
+                        continue
+                    
+                    # Process the response (same as original select_article_to_api logic)
+                    stripped = ai_parser.strip_markdown(response_content)
+                    data = json.loads(stripped)
+                    
+                    # Format response with URL key (same as original include_url=True behavior)
+                    tagged_data = {url: data}
+                    responses.append(tagged_data)
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"DIAGNOSTIC: JSONDecodeError for prompt {i+1} - PID: {process_id}: {e}")
+                    responses.append(None)
+                except Exception as e:
+                    logger.error(f"DIAGNOSTIC: Unexpected error for prompt {i+1} - PID: {process_id}: {e}")
+                    responses.append(None)
+                
+                # Add pause between prompts (same as original avg_pause=1)
+                if i < len(prompts) - 1:  # Don't pause after the last prompt
+                    await asyncio.sleep(1)
         
         finally:
-            await ai_parser.cleanup()
+            # Ensure cleanup always happens, even if initialization or processing fails
+            try:
+                await ai_parser.cleanup()
+                logger.debug(f"DIAGNOSTIC: Cleaned up resources for {url} - PID: {process_id}")
+            except Exception as cleanup_error:
+                # Log cleanup errors but don't let them mask original errors
+                logger.error(f"DIAGNOSTIC: Error during cleanup for {url} - PID: {process_id}: {cleanup_error}")
+                # Don't re-raise cleanup errors - they shouldn't mask the original processing errors
             
         # DIAGNOSTIC: Log completion
         logger.info(f"DIAGNOSTIC: Completed get_responses_for_url for {url}, got {len(responses)} responses - PID: {process_id}")

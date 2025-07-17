@@ -75,4 +75,4 @@ article_list_url = "https://pv-magazine-usa.com/category/installations/commercia
 article_urls = get_article_urls(article_list_url, max_pages=2)
 
 output = get_all_articles(article_urls)
-breakpoint()
+print(f"Scraped {len(output)} articles")

@@ -5,7 +5,6 @@ def scrape_article(url):
         browser = p.chromium.launch()
         page = browser.new_page()
         page.goto(url)
-        breakpoint()
         # Find the article content
         article_content = page.query_selector('div.post-content')
         if article_content:

@@ -25,11 +25,9 @@ def scrape_article_list(url):
 
         # Find all the article links
         article_links = [link.get_attribute('href') for link in page.query_selector_all('article a')]
-        breakpoint()
 
         articles = []
         for article_url in article_links:
-            breakpoint()
             article_text = scrape_article(article_url)
             articles.append(article_text)
 
@@ -38,7 +36,6 @@ def scrape_article_list(url):
 
 # Example usage
 article_list_url = "https://pv-magazine-usa.com/category/installations/commercial-industrial-pv/"
-breakpoint()
 article_contents = scrape_article_list(article_list_url)
 for article in article_contents:
     print(article)

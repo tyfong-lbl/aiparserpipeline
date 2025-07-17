@@ -177,3 +177,6 @@ cython_debug/
 error_*.txt
 *.log
 /diagnostics
+
+# scraped cache files
+scraped_cache/

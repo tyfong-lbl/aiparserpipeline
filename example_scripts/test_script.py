@@ -42,7 +42,6 @@ def strip_markdown(text):
     return re.sub(r'^```json(.*)```', r'\1', text, flags=re.DOTALL)
 
 data = json.loads(strip_markdown(response.choices[0].message.content))
-breakpoint()
 
 print(json.dumps(data, indent=4))
 

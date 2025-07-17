@@ -13,7 +13,6 @@ api_key = os.environ.get('CYCLOGPT_API_KEY')
 #api_url = "https://api.cyclogpt.lbl.gov"
 api_url = "https://api-local.cborg.lbl.gov/"
 model = 'lbl/cyclogpt:chat-v1'
-breakpoint()
 
 tool = AiParser(publication_url=pv_mag,
                 project_name='Slate',
