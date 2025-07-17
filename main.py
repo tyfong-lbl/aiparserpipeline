@@ -184,7 +184,8 @@ async def main():
     print("test message")
     #excel_path = "G:\\Shared drives\\USS\\Automation\\Solar_Project_Tracker_ITexamples_2022_noPDFs.xlsx"
     #excel_path = "/Users/TYFong/Desktop/worklogs/project_logs/ai_parser/25_sample_columns.xlsx"
-    excel_path = "/Users/TYFong/code/aiparserpipeline/diagnostics/Solar_Project_Tracker_ITexamples_2022_noPDFs_250521smalltest.xlsx"
+    home_path = Path.home()
+    excel_path = Path(home_path,"code/aiparserpipeline/diagnostics/Solar_Project_Tracker_ITexamples_2022_noPDFs_250521smalltest.xlsx")
     api_key = os.environ.get('CBORG_API_KEY')
     api_url = "https://api.cborg.lbl.gov"
     model = 'lbl/llama' #lbl/cborg-chat:latest' # option list found here: https://cborg.lbl.gov/models/
