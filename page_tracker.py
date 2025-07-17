@@ -792,6 +792,12 @@ class ModelValidator:
         # DIAGNOSTIC: Log URL processing start
         logger.info(f"DIAGNOSTIC: Starting get_responses_for_url for {url} in project {self.project_name} - PID: {process_id}, Task ID: {task_id}")
         
+        # Start timing for text extraction (pipeline logging)
+        text_extraction_start_time = time.perf_counter()
+        text_extraction_status = False
+        text_extraction_error = None
+        text_length = 0
+        
         prompts = self.get_all_prompts()
         responses = []
         
@@ -805,6 +811,17 @@ class ModelValidator:
                              project_name=self.project_name,
                              pipeline_logger=self.pipeline_logger)
         
+        # Store logging context for pipeline logging
+        if self.pipeline_logger:
+            logging_context = {
+                'url': url,
+                'project_name': self.project_name,
+                'text_extraction_start_time': text_extraction_start_time,
+                'text_extraction_status': text_extraction_status,
+                'text_extraction_error': text_extraction_error,
+                'text_length': text_length
+            }
+        
         # Ensure cleanup happens under all conditions, including initialization failures
         try:
             # Step 1: Initialize browser
@@ -814,13 +831,58 @@ class ModelValidator:
             try:
                 cache_path = await ai_parser.scrape_and_cache(url)
                 logger.info(f"DIAGNOSTIC: Successfully scraped and cached {url} -> {cache_path} - PID: {process_id}")
+                
+                # Update text extraction metrics for successful scraping
+                text_extraction_status = True
+                text_extraction_error = None
+                # Get text length from cached content
+                try:
+                    with open(cache_path, 'r', encoding='utf-8') as f:
+                        cached_content = f.read()
+                        text_length = len(cached_content)
+                except Exception:
+                    text_length = 0  # Fallback if we can't read cache
+                
+                if self.pipeline_logger:
+                    logging_context.update({
+                        'text_extraction_status': text_extraction_status,
+                        'text_extraction_error': text_extraction_error,
+                        'text_length': text_length
+                    })
+                    
             except Exception as scraping_error:
                 # Handle scraping errors - return empty list to preserve original behavior
                 logger.error(f"DIAGNOSTIC: Scraping failed for {url} - PID: {process_id}: {type(scraping_error).__name__}: {scraping_error}")
-                # Ensure cleanup happens even when scraping fails
+                
+                # Update text extraction metrics for failed scraping
+                text_extraction_status = False
+                text_extraction_error = str(scraping_error)
+                text_length = 0
+                
+                # Log the failed text extraction to pipeline logger
+                if self.pipeline_logger:
+                    logging_context.update({
+                        'text_extraction_status': text_extraction_status,
+                        'text_extraction_error': text_extraction_error,
+                        'text_length': text_length
+                    })
+                    
+                    # Create dummy LLM metrics since no LLM processing occurred
+                    dummy_llm_metrics = {
+                        'llm_response_status': False,
+                        'llm_response_error': 'Text extraction failed - no LLM processing attempted',
+                        'llm_processing_time': 0
+                    }
+                    
+                    self._complete_logging_cycle_for_url(logging_context, dummy_llm_metrics)
+                
                 return []
             
             # Step 3: Process all prompts against the cached content
+            successful_responses = 0
+            total_llm_processing_time = 0
+            last_llm_error = None
+            
             for i, prompt in enumerate(prompts):
                 # DIAGNOSTIC: Log each prompt processing
                 logger.info(f"DIAGNOSTIC: Processing prompt {i+1}/{len(prompts)} for URL {url} - PID: {process_id}")
@@ -829,6 +891,14 @@ class ModelValidator:
                 try:
                     # Get LLM response using cached content (no scraping)
                     response_content, llm_metrics = ai_parser.get_api_response()
+                    
+                    # Accumulate LLM metrics
+                    if llm_metrics:
+                        total_llm_processing_time += llm_metrics.get('llm_processing_time', 0)
+                        if llm_metrics.get('llm_response_status'):
+                            successful_responses += 1
+                        else:
+                            last_llm_error = llm_metrics.get('llm_response_error', 'Unknown LLM error')
                     
                     if response_content is None:
                         logger.error(f"DIAGNOSTIC: No response content from API for prompt {i+1} - PID: {process_id}")
@@ -846,13 +916,29 @@ class ModelValidator:
                 except json.JSONDecodeError as e:
                     logger.error(f"DIAGNOSTIC: JSONDecodeError for prompt {i+1} - PID: {process_id}: {e}")
                     responses.append(None)
+                    last_llm_error = f"JSONDecodeError: {str(e)}"
                 except Exception as e:
                     logger.error(f"DIAGNOSTIC: Unexpected error for prompt {i+1} - PID: {process_id}: {e}")
                     responses.append(None)
+                    last_llm_error = str(e)
                 
                 # Add pause between prompts (same as original avg_pause=1)
                 if i < len(prompts) - 1:  # Don't pause after the last prompt
                     await asyncio.sleep(1)
+            
+            # Log overall processing results to pipeline logger
+            if self.pipeline_logger:
+                # Determine overall LLM success
+                llm_response_status = successful_responses > 0
+                llm_response_error = "None" if llm_response_status else (last_llm_error or "All LLM processing failed")
+                
+                combined_llm_metrics = {
+                    'llm_response_status': llm_response_status,
+                    'llm_response_error': llm_response_error,
+                    'llm_processing_time': total_llm_processing_time
+                }
+                
+                self._complete_logging_cycle_for_url(logging_context, combined_llm_metrics)
         
         finally:
             # Ensure cleanup always happens, even if initialization or processing fails
@@ -867,6 +953,39 @@ class ModelValidator:
         # DIAGNOSTIC: Log completion
         logger.info(f"DIAGNOSTIC: Completed get_responses_for_url for {url}, got {len(responses)} responses - PID: {process_id}")
         return responses
+
+    def _complete_logging_cycle_for_url(self, logging_context, llm_metrics):
+        """Complete the logging cycle by writing to CSV with all collected metrics for get_responses_for_url."""
+        if not self.pipeline_logger:
+            return
+            
+        # Calculate total response time
+        text_extraction_time = time.perf_counter() - logging_context['text_extraction_start_time']
+        llm_processing_time = llm_metrics.get('llm_processing_time', 0)
+        total_response_time_ms = int((text_extraction_time + llm_processing_time) * 1000)
+        
+        # Generate current timestamp
+        current_timestamp = datetime.now().astimezone().isoformat()
+        
+        # Convert status values to strings and handle None errors - matching existing log format
+        text_extraction_status_str = "True" if logging_context['text_extraction_status'] else "False"
+        text_extraction_error_str = logging_context['text_extraction_error'] if logging_context['text_extraction_error'] else "None"
+        
+        llm_response_status_str = "True" if llm_metrics['llm_response_status'] else "False"
+        llm_response_error_str = llm_metrics['llm_response_error'] if llm_metrics['llm_response_error'] else "None"
+        
+        # Log to CSV using the exact same format as existing pipeline logs
+        self.pipeline_logger.log_url_processing(
+            url=logging_context['url'],
+            project_name=logging_context['project_name'],
+            timestamp=current_timestamp,
+            text_extraction_status=text_extraction_status_str,
+            text_extraction_error=text_extraction_error_str,
+            text_length=logging_context['text_length'],
+            llm_response_status=llm_response_status_str,
+            llm_response_error=llm_response_error_str,
+            response_time_ms=total_response_time_ms
+        )
     
     @staticmethod
     def extract_urls(text):
