@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an AI-powered solar project intelligence pipeline that scrapes web content and extracts structured data using LLM APIs. The system processes Excel files containing project names and URLs, scrapes content using Playwright, and analyzes it through CBORG's LLM API to extract specific solar project attributes.
+This is an AI-powered solar project intelligence pipeline that scrapes web content and extracts structured data using LLM APIs. The system processes Excel files containing project names and URLs, scrapes content using Playwright with intelligent caching ("scrape once, prompt many"), and analyzes it through CBORG's LLM API to extract specific solar project attributes. The pipeline includes a robust caching system that eliminates redundant web scraping operations for improved performance.
 
 ## Core Commands
 
@@ -21,6 +21,10 @@ python tests/verify_logging_deployment.py  # Verify logging functionality
 # Individual module testing
 python model_validator.py        # Run single project validation
 python tests/test_kagi.py        # Test Kagi API integration
+python hpc_debug_helper.py       # HPC environment debugging utilities
+
+# Cache management
+python -c "from cache_utils import *; print('Cache utilities loaded')"  # Test cache functionality
 ```
 
 ## Architecture
@@ -28,20 +32,23 @@ python tests/test_kagi.py        # Test Kagi API integration
 ### Core Processing Flow
 1. **Excel Input**: `excel_sampler.py` reads project data from Excel files
 2. **Web Scraping**: `page_tracker.py` contains `AiParser` class using Playwright for content extraction
-3. **LLM Processing**: `ModelValidator` class sends scraped content to CBORG API for structured data extraction
-4. **Orchestration**: `multi_project_validator.py` coordinates batch processing of multiple projects
-5. **Logging**: `pipeline_logger.py` provides thread-safe CSV logging of all processing metrics
-6. **Checkpointing**: `main.py` implements atomic file locking and pickle-based resume functionality
+3. **Cache Management**: `cache_utils.py` handles intelligent caching with URL hashing and atomic file operations
+4. **LLM Processing**: `ModelValidator` class sends scraped content to CBORG API for structured data extraction
+5. **Orchestration**: `multi_project_validator.py` coordinates batch processing of multiple projects
+6. **Logging**: `pipeline_logger.py` provides thread-safe CSV logging of all processing metrics
+7. **Checkpointing**: `main.py` implements atomic file locking and pickle-based resume functionality
 
 ### Key Classes
-- `AiParser` (`page_tracker.py`): Handles web scraping with Playwright
+- `AiParser` (`page_tracker.py`): Handles web scraping with Playwright and cache integration
 - `ModelValidator` (`model_validator.py`): Manages LLM API interactions and response validation
 - `MultiProjectValidator` (`multi_project_validator.py`): Batch processing coordinator
 - `PipelineLogger` (`pipeline_logger.py`): Thread-safe logging system
+- `CacheUtils` (`cache_utils.py`): Manages URL hashing, thread ID generation, and atomic cache operations
 
 ### Data Flow
 - **Input**: Excel files with project names and URLs
-- **Processing**: Concurrent web scraping → LLM analysis → structured extraction
+- **Processing**: Concurrent web scraping → cache storage in `scraped_cache/` → LLM analysis → structured extraction
+- **Cache**: Persistent cached content in `scraped_cache/` directory for "scrape once, prompt many" optimization
 - **Output**: Timestamped CSV files in `results/` directory
 - **Logging**: Comprehensive metrics in `pipeline_logs/` directory
 - **Checkpoints**: Resumable processing via pickle files in `checkpoints/`
@@ -73,9 +80,12 @@ Comprehensive logging tracks success/failure rates, processing times, and error 
 
 ### Testing Structure
 - `tests/`: Unit and integration tests
+- `tests/cache/`: Cache-specific tests including atomic operations and thread safety
 - `test_readouts/`: Test output files and sample data
 - `sample_databases/`: SQLite files for testing
 - `groundtruth/`: Reference data for validation
+- `kagi_test/`: Kagi search API integration testing
+- `gemini_search_tests/`: Google Gemini API testing
 
 ### Error Handling
 The system includes robust error handling for common issues:
