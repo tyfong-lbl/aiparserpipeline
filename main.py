@@ -207,6 +207,11 @@ async def main():
     # DIAGNOSTIC: Add checkpoint before creating MultiProjectValidator
     logging.info(f"MAIN_CHECKPOINT_2: About to create MultiProjectValidator - PID={pid}")
     
+    # Calculate max concurrent projects based on memory allocation
+    # Assuming ~75MB per project, with 62GB total allocation
+    # Leave buffer for OS and other processes
+    max_concurrent_projects = 50  # Conservative limit for 62GB allocation
+    
     multi_validator = MultiProjectValidator(
         excel_path=excel_path,
         api_key=api_key,
@@ -214,7 +219,8 @@ async def main():
         model=model,
         prompt_directory=prompt_directory,
         checkpoint_dir=checkpoint_dir,
-        logger=logger
+        logger=logger,
+        max_concurrent_projects=max_concurrent_projects
     )
     
     # DIAGNOSTIC: Add checkpoint after creating MultiProjectValidator

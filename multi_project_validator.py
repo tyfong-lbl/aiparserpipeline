@@ -24,7 +24,8 @@ class MultiProjectValidator:
                  checkpoint_dir: Path,
                  number_of_queries: int = 5,
                  prompt_filename_base: str = 'solar-projects-priority-prompt',
-                 logger=None):
+                 logger=None,
+                 max_concurrent_projects: int = 50):
         self.excel_path = excel_path
         self.api_key = api_key
         self.api_url = api_url
@@ -36,6 +37,8 @@ class MultiProjectValidator:
         self.number_of_queries = number_of_queries
         self.prompt_filename_base = prompt_filename_base
         self.pipeline_logger = logger
+        self.max_concurrent_projects = max_concurrent_projects
+        self.project_semaphore = asyncio.Semaphore(max_concurrent_projects)
         
         self.url_df = None
         self.project_names = None
@@ -101,8 +104,13 @@ class MultiProjectValidator:
         if self.checkpoint_dir is None:
             self.logger.error("checkpoint_dir is None, cannot save checkpoint")
         self.checkpoint_dir.mkdir(exist_ok=True)
+        
+        # Create a copy of project_outputs to avoid race condition
+        # when multiple threads are modifying the dictionary during pickling
+        project_outputs_copy = dict(self.project_outputs)
+        
         with open(self._get_checkpoint_path(), 'wb') as f:
-            await asyncio.to_thread(pickle.dump, self.project_outputs, f)
+            await asyncio.to_thread(pickle.dump, project_outputs_copy, f)
         self.logger.info(f"Checkpoint saved. Completed projects: {len(self.completed_projects)}")
 
     def _load_checkpoint(self):
@@ -133,7 +141,7 @@ class MultiProjectValidator:
             self.completed_projects = set()
 
     async def process_project(self, project_name: str) -> pd.DataFrame:
-        """Process a single project."""
+        """Process a single project with semaphore control."""
         import os
         process_id = os.getpid()
         task_id = id(asyncio.current_task())
@@ -141,49 +149,57 @@ class MultiProjectValidator:
         # DIAGNOSTIC: Log process and task information
         self.logger.info(f"DIAGNOSTIC: Starting process_project for {project_name} - PID: {process_id}, Task ID: {task_id}")
         
-        try:
-            if project_name in self.completed_projects:
-                self.logger.info(f"DIAGNOSTIC: Skipping already completed project: {project_name} - PID: {process_id}")
-                return pd.DataFrame()
-
-            self.logger.info(f"DIAGNOSTIC: Processing project: {project_name} - PID: {process_id}, Task ID: {task_id}")
-            project_urls = self.url_df[project_name]
-            
-            # DIAGNOSTIC: Log URL count for this project
-            url_count = len(project_urls.dropna())
-            self.logger.info(f"DIAGNOSTIC: Project {project_name} has {url_count} URLs to process - PID: {process_id}")
-            
-            model_validator = ModelValidator(
-                **self.common_params,
-                project_name=project_name,
-                url_df=project_urls,
-                pipeline_logger=self.pipeline_logger
-            )
-            
+        async with self.project_semaphore:
+            # Log semaphore acquisition
+            current_count = self.max_concurrent_projects - self.project_semaphore._value
+            self.logger.info(f"SEMAPHORE: Acquired semaphore for {project_name} - Current concurrent projects: {current_count}/{self.max_concurrent_projects} - PID: {process_id}")
+        
             try:
-                self.logger.info(f"DIAGNOSTIC: About to call consolidate_responses for {project_name} - PID: {process_id}")
-                df = await model_validator.consolidate_responses()
-                self.logger.info(f"DIAGNOSTIC: consolidate_responses completed for {project_name}, got {len(df)} rows - PID: {process_id}")
+                if project_name in self.completed_projects:
+                    self.logger.info(f"DIAGNOSTIC: Skipping already completed project: {project_name} - PID: {process_id}")
+                    return pd.DataFrame()
+
+                self.logger.info(f"DIAGNOSTIC: Processing project: {project_name} - PID: {process_id}, Task ID: {task_id}")
+                project_urls = self.url_df[project_name]
                 
-                self.project_outputs[project_name] = df
-                self.logger.info(f"Successfully processed project: {project_name}")
-                self.completed_projects.add(project_name)
-                self.logger.info(f"DIAGNOSTIC: About to save checkpoint for {project_name} - PID: {process_id}")
+                # DIAGNOSTIC: Log URL count for this project
+                url_count = len(project_urls.dropna())
+                self.logger.info(f"DIAGNOSTIC: Project {project_name} has {url_count} URLs to process - PID: {process_id}")
+                
+                model_validator = ModelValidator(
+                    **self.common_params,
+                    project_name=project_name,
+                    url_df=project_urls,
+                    pipeline_logger=self.pipeline_logger
+                )
+                
                 try:
-                    await self._save_checkpoint()
-                except TypeError as e:
-                    print(e)
-                self.logger.info(f"DIAGNOSTIC: Checkpoint saved for {project_name} - PID: {process_id}")
-                return df
+                    self.logger.info(f"DIAGNOSTIC: About to call consolidate_responses for {project_name} - PID: {process_id}")
+                    df = await model_validator.consolidate_responses()
+                    self.logger.info(f"DIAGNOSTIC: consolidate_responses completed for {project_name}, got {len(df)} rows - PID: {process_id}")
+                    
+                    self.project_outputs[project_name] = df
+                    self.logger.info(f"Successfully processed project: {project_name}")
+                    self.completed_projects.add(project_name)
+                    self.logger.info(f"DIAGNOSTIC: About to save checkpoint for {project_name} - PID: {process_id}")
+                    try:
+                        await self._save_checkpoint()
+                    except TypeError as e:
+                        print(e)
+                    self.logger.info(f"DIAGNOSTIC: Checkpoint saved for {project_name} - PID: {process_id}")
+                    return df
+                except Exception as e:
+                    import traceback
+                    self.logger.error(f"Error processing project {project_name}: {e}")
+                    self.logger.error(traceback.format_exc())
+                    return pd.DataFrame()  # Return empty DataFrame on error
             except Exception as e:
-                import traceback
-                self.logger.error(f"Error processing project {project_name}: {e}")
+                self.logger.error(f"Unexpected error processing project {project_name}: {e}")
                 self.logger.error(traceback.format_exc())
                 return pd.DataFrame()  # Return empty DataFrame on error
-        except Exception as e:
-            self.logger.error(f"Unexpected error processing project {project_name}: {e}")
-            self.logger.error(traceback.format_exc())
-            return pd.DataFrame()  # Return empty DataFrame on error
+            finally:
+                # Log semaphore release
+                self.logger.info(f"SEMAPHORE: Released semaphore for {project_name} - PID: {process_id}")
 
     async def process_all_projects(self) -> pd.DataFrame:
         import os
