@@ -189,6 +189,7 @@ async def main():
     api_key = os.environ.get('CBORG_API_KEY')
     api_url = "https://api.cborg.lbl.gov"
     model = 'lbl/llama' #lbl/cborg-chat:latest' # option list found here: https://cborg.lbl.gov/models/
+    #model = 'google/gemini-pro'
     prompt_directory = Path(__file__).resolve().parent / 'test_prompts'
     output_dir = Path(__file__).resolve().parent / 'results'
     checkpoint_dir = Path(__file__).resolve().parent / 'checkpoints'
