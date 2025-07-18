@@ -1021,10 +1021,40 @@ class ModelValidator:
         if input_dict is None:
             logger.warning("Encountered None input in flatten_dict")
             return {}
+        
         # Extract the single URL and its associated data
         url, attributes = next(iter(input_dict.items()))
-        # Flatten
-        flattened_dict = {k:v for k, v in attributes.items()}
+        
+        # Check if we have nested project data (LLM returned project names as keys)
+        if all(isinstance(v, dict) for v in attributes.values() if v is not None) and len(attributes) > 0:
+            logger.info(f"FLATTEN_DICT: Detected nested project structure, extracting data for {self.project_name}")
+            
+            # Find any project that matches our expected name and extract its data
+            expected_name = self.project_name.lower()
+            project_data = None
+            
+            for project_name, data in attributes.items():
+                if isinstance(data, dict) and expected_name in project_name.lower():
+                    logger.info(f"FLATTEN_DICT: Found matching project '{project_name}', extracting data")
+                    project_data = data
+                    break
+            
+            if project_data:
+                # Use the project data but with our standardized project name
+                flattened_dict = {k: v for k, v in project_data.items()}
+                flattened_dict['project_name'] = self.project_name  # Use input project name, not LLM's version
+                logger.info(f"FLATTEN_DICT: Using standardized project name: {self.project_name}")
+            else:
+                # No matching project found
+                flattened_dict = {}
+                logger.warning(f"FLATTEN_DICT: No matching project found for {self.project_name}")
+        else:
+            # Normal flat structure (original behavior)
+            flattened_dict = {k: v for k, v in attributes.items()}
+            # Ensure we always have a consistent project_name field
+            if 'project_name' not in flattened_dict:
+                flattened_dict['project_name'] = self.project_name
+        
         flattened_dict['url'] = url
         return flattened_dict
     
