@@ -922,10 +922,6 @@ class ModelValidator:
                     responses.append(None)
                     last_llm_error = str(e)
                 
-                # Add pause between prompts (same as original avg_pause=1)
-                if i < len(prompts) - 1:  # Don't pause after the last prompt
-                    await asyncio.sleep(1)
-            
             # Log overall processing results to pipeline logger
             if self.pipeline_logger:
                 # Determine overall LLM success
