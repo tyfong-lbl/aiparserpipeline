@@ -74,49 +74,52 @@ class AiParser:
         if self.playwright:
             await self.playwright.stop()
     
-    async def scrape_and_cache(self, url: str) -> str:
+    async def scrape_and_cache(self, url: str) -> tuple:
         """
         Scrape a webpage and cache its content for reuse with multiple prompts.
-        
+
         This method performs web scraping of the provided URL and stores the content
         in a cache file for efficient reuse across multiple LLM API calls with different
         prompts. This eliminates redundant network requests and improves performance
         when processing the same URL with multiple prompts.
-        
+
         The method includes comprehensive error handling for:
         - Network failures and browser errors during scraping
         - Disk operation failures with retry logic via atomic write function
         - File system errors (permissions, disk full, etc.)
         - Memory pressure from large content
         - Unicode encoding issues
-        
+
         The method:
         1. Validates the input URL parameter
         2. Scrapes the webpage content using Playwright browser automation
         3. Generates a unique cache filename based on URL, project name, and thread IDs
         4. Stores the scraped content atomically in the cache file with retry logic
-        5. Returns the path to the cache file for later content retrieval
-        
+        5. Returns a tuple containing the success status and the path to the cache file
+
         Args:
             url (str): The URL to scrape and cache. Must be a non-empty string
                       representing a valid web address.
-        
+
         Returns:
-            str: The full path to the cache file containing the scraped content.
-                The cache file can be read later to retrieve the scraped content
-                without re-scraping the webpage. Returns path even if scraping
-                or file operations fail (for consistency in calling code).
-        
+            tuple: (scraping_successful, cache_file_path) where:
+                - scraping_successful (bool): True if scraping was successful and returned non-empty content,
+                                              False otherwise
+                - cache_file_path (str): The full path to the cache file containing the scraped content.
+                                        The cache file can be read later to retrieve the scraped content
+                                        without re-scraping the webpage. Returns path even if scraping
+                                        or file operations fail (for consistency in calling code).
+
         Raises:
             ValueError: If url is None, empty string, or contains only whitespace
             TypeError: If url is not a string
-        
+
         Example:
             >>> ai_parser = AiParser(api_key="...", api_url="...", ...)
             >>> await ai_parser.initialize()
-            >>> cache_path = await ai_parser.scrape_and_cache("https://example.com")
-            >>> print(f"Content cached at: {cache_path}")
-        
+            >>> success, cache_path = await ai_parser.scrape_and_cache("https://example.com")
+            >>> print(f"Content cached at: {cache_path}, Success: {success}")
+
         Note:
             This method is part of the AiParser refactoring to eliminate redundant
             web scraping. It uses atomic file operations with retry logic and
@@ -125,14 +128,14 @@ class AiParser:
         # Parameter validation - ensure URL is valid
         if url is None:
             raise ValueError("URL cannot be None")
-        
+
         if not isinstance(url, str):
             raise TypeError("URL must be a string")
-        
+
         # Check for empty or whitespace-only URLs
         if not url or not url.strip():
             raise ValueError("URL cannot be empty or contain only whitespace")
-        
+
         # Generate cache filename using utility functions
         # Store the cache file path regardless of success/failure for consistency
         cache_file_path = None
@@ -150,17 +153,17 @@ class AiParser:
             cache_file_path = str(temp_dir / f"cache_fallback_{abs(hash(url))}.txt")
             self._cache_file_path = cache_file_path
             logger.warning(f"Using fallback cache file path: {cache_file_path}")
-        
+
         # Web scraping operation with comprehensive error handling
         page = None
         fulltext = ""
         scraping_successful = False
         scraping_error = None
-        
+
         try:
             logger.debug(f"Starting web scraping for URL: {url}")
             page = await self.browser.new_page()
-            
+
             # Navigate to page with error handling
             try:
                 await page.goto(url, timeout=30000)  # 30 second timeout
@@ -168,35 +171,42 @@ class AiParser:
             except Exception as nav_error:
                 logger.error(f"Navigation failed for URL {url}: {type(nav_error).__name__}: {nav_error}")
                 raise nav_error
-            
+
             # Extract title and content with error handling
             try:
                 title = await page.title()
                 text = await page.evaluate('() => document.body.innerText')
                 fulltext = f"{title}.\n\n{text}"
-                scraping_successful = True
-                logger.debug(f"Successfully scraped content from {url} (length: {len(fulltext)} chars)")
-                
-                # Check for unusually large content and log warning
-                if len(fulltext) > 5 * 1024 * 1024:  # 5MB threshold
-                    logger.warning(f"Large content detected for {url}: {len(fulltext)} characters")
-                
+
+                # Check if the extracted content is empty or only whitespace
+                if fulltext and fulltext.strip():
+                    scraping_successful = True
+                    logger.debug(f"Successfully scraped content from {url} (length: {len(fulltext)} chars)")
+
+                    # Check for unusually large content and log warning
+                    if len(fulltext) > 5 * 1024 * 1024:  # 5MB threshold
+                        logger.warning(f"Large content detected for {url}: {len(fulltext)} characters")
+                else:
+                    logger.warning(f"No meaningful content extracted from {url}. Fulltext length: {len(fulltext)} chars")
+                    scraping_successful = False
+
             except Exception as extract_error:
                 logger.error(f"Content extraction failed for URL {url}: {type(extract_error).__name__}: {extract_error}")
                 raise extract_error
-                
+
         except Exception as e:
             # Handle all scraping errors comprehensively
             scraping_error = e
             error_type = type(e).__name__
             logger.error(f"Error during web scraping for URL {url}: {error_type}: {e}")
-            
+
             # Log additional context for debugging
             logger.error(f"Scraping error context - URL: {url}, Project: {self.project_name}")
-            
+
             # Set empty content on scraping error - this ensures file operations don't fail
             fulltext = ""
-            
+            scraping_successful = False
+
         finally:
             # Ensure browser page cleanup happens regardless of success/failure
             if page is not None:
@@ -207,14 +217,14 @@ class AiParser:
                     # Log cleanup errors but don't let them affect the main operation
                     logger.warning(f"Error during page cleanup for URL {url}: {type(cleanup_error).__name__}: {cleanup_error}")
                     # Continue execution - cleanup errors should not fail the entire operation
-        
+
         # File writing operation with comprehensive error handling
         file_write_successful = False
         file_write_error = None
-        
+
         try:
             logger.debug(f"Attempting to write cache file: {cache_file_path}")
-            
+
             # Ensure the cache directory exists before writing
             cache_dir = Path(cache_file_path).parent
             try:
@@ -223,22 +233,22 @@ class AiParser:
             except Exception as dir_error:
                 logger.error(f"Error creating cache directory {cache_dir}: {type(dir_error).__name__}: {dir_error}")
                 # Continue with write attempt - atomic_write_file will handle directory creation
-            
+
             # Use atomic write function (which includes retry logic)
             atomic_write_file(cache_file_path, fulltext)
             file_write_successful = True
             logger.debug(f"Successfully wrote cache file: {cache_file_path} ({len(fulltext)} chars)")
-            
+
         except Exception as e:
             # Handle file writing errors comprehensively
             file_write_error = e
             error_type = type(e).__name__
             logger.error(f"Error writing cache file {cache_file_path}: {error_type}: {e}")
-            
+
             # Log additional context for debugging
             logger.error(f"File write error context - Cache path: {cache_file_path}, Content length: {len(fulltext)}")
             logger.error(f"Project: {self.project_name}, URL: {url}")
-            
+
             # Check for specific error types and provide actionable information
             if isinstance(e, PermissionError):
                 logger.error(f"Permission denied writing to {cache_file_path}. Check file/directory permissions.")
@@ -248,7 +258,7 @@ class AiParser:
                 logger.error(f"Read-only filesystem error writing to {cache_file_path}. Check filesystem mount options.")
             else:
                 logger.error(f"Unexpected file system error: {e}")
-        
+
         # Log final operation summary for debugging
         if scraping_successful and file_write_successful:
             logger.info(f"Successfully scraped and cached {url} -> {cache_file_path}")
@@ -258,11 +268,11 @@ class AiParser:
             logger.warning(f"Scraping failed for {url} but empty cache file created -> {cache_file_path}")
         else:
             logger.error(f"Both scraping and cache writing failed for {url} -> {cache_file_path}")
-        
-        # Always return the cache file path for consistency in calling code
-        # This allows the rest of the pipeline to continue functioning even if
-        # some operations failed (e.g., file contains empty content on scraping failure)
-        return cache_file_path
+
+        # Return a tuple with success status and cache file path
+        # This allows the calling code to properly handle cases where scraping failed
+        # or returned empty content
+        return (scraping_successful, cache_file_path)
       
     async def get_articles_urls(self) -> list:
         if not self.publication_url:
@@ -540,8 +550,9 @@ class AiParser:
             
             fulltext = f"{title}.\n\n{text}"
             text_length = len(fulltext)
-            text_extraction_status = True
-            text_extraction_error = None
+            if text_length == 0:
+                text_extraction_status = False
+                text_extraction_error = "Text length is {text_length}"
             
         except Exception as e:
             logger.error(f"Error fetching article: {e}")
@@ -829,12 +840,17 @@ class ModelValidator:
             
             # Step 2: Scrape and cache the URL content once
             try:
-                cache_path = await ai_parser.scrape_and_cache(url)
-                logger.info(f"DIAGNOSTIC: Successfully scraped and cached {url} -> {cache_path} - PID: {process_id}")
-                
-                # Update text extraction metrics for successful scraping
-                text_extraction_status = True
-                text_extraction_error = None
+                # scrape_and_cache now returns a tuple (scraping_successful, cache_path)
+                scraping_result = await ai_parser.scrape_and_cache(url)
+                scraping_successful = scraping_result[0]
+                cache_path = scraping_result[1]
+
+                logger.info(f"DIAGNOSTIC: Scraped {url} -> {cache_path} - Success: {scraping_successful} - PID: {process_id}")
+
+                # Set text extraction status based on actual scraping success
+                text_extraction_status = scraping_successful
+                text_extraction_error = None if scraping_successful else "No meaningful content extracted"
+
                 # Get text length from cached content
                 try:
                     with open(cache_path, 'r', encoding='utf-8') as f:
@@ -842,18 +858,23 @@ class ModelValidator:
                         text_length = len(cached_content)
                 except Exception:
                     text_length = 0  # Fallback if we can't read cache
-                
+
                 if self.pipeline_logger:
                     logging_context.update({
                         'text_extraction_status': text_extraction_status,
                         'text_extraction_error': text_extraction_error,
                         'text_length': text_length
                     })
-                    
+
+                # Only consider this successful if we actually got meaningful content
+                if not scraping_successful:
+                    logger.warning(f"DIAGNOSTIC: Scraping returned empty/whitespace content for {url} - PID: {process_id}")
+                    return []
+
             except Exception as scraping_error:
                 # Handle scraping errors - return empty list to preserve original behavior
                 logger.error(f"DIAGNOSTIC: Scraping failed for {url} - PID: {process_id}: {type(scraping_error).__name__}: {scraping_error}")
-                
+
                 # Update text extraction metrics for failed scraping
                 text_extraction_status = False
                 text_extraction_error = str(scraping_error)

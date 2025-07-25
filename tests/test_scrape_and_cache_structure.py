@@ -15,7 +15,7 @@ Tests verify the method contract that will be filled in during subsequent steps.
 import pytest
 import asyncio
 import inspect
-from unittest.mock import Mock
+from unittest.mock import Mock, AsyncMock
 import sys
 from pathlib import Path
 
@@ -63,9 +63,9 @@ class TestScrapeAndCacheMethodStructure:
         # Verify url parameter type hint
         url_param = signature.parameters['url']
         assert url_param.annotation == str, "url parameter should be annotated as str"
-        
-        # Verify return type hint
-        assert signature.return_annotation == str, "Method should return str type"
+
+        # Verify return type hint - now returns a tuple (success_status, cache_path)
+        assert signature.return_annotation == tuple, "Method should return tuple type"
     
     def test_scrape_and_cache_is_async(self):
         """Test that scrape_and_cache is an async method."""
@@ -163,8 +163,8 @@ class TestScrapeAndCacheMethodStructure:
                 f"Error should mention URL or string type for input: {invalid_url}"
     
     @pytest.mark.asyncio
-    async def test_scrape_and_cache_raises_not_implemented_error(self):
-        """Test that scrape_and_cache raises NotImplementedError when called with valid URL."""
+    async def test_scrape_and_cache_returns_tuple(self):
+        """Test that scrape_and_cache returns a tuple (success_status, cache_path)."""
         ai_parser = AiParser(
             api_key="test_key",
             api_url="https://test.api.com",
@@ -172,14 +172,27 @@ class TestScrapeAndCacheMethodStructure:
             prompt="Test prompt",
             project_name="Test Project"
         )
-        
-        # Test with valid URL - should raise NotImplementedError
-        with pytest.raises(NotImplementedError):
-            await ai_parser.scrape_and_cache("https://example.com")
-    
+
+        # Mock browser initialization since we're just testing return type
+        ai_parser.browser = AsyncMock()
+        mock_page = AsyncMock()
+        mock_page.title.return_value = "Test Title"
+        mock_page.evaluate.return_value = "Test content"
+        ai_parser.browser.new_page.return_value = mock_page
+
+        # Result should be a tuple
+        result = await ai_parser.scrape_and_cache("https://example.com")
+
+        # Verify it's a tuple
+        assert isinstance(result, tuple), "Result should be a tuple"
+        assert len(result) == 2, "Tuple should have 2 elements (success_status, cache_path)"
+        success_status, cache_path = result
+        assert isinstance(success_status, bool), "First element should be boolean success status"
+        assert isinstance(cache_path, str), "Second element should be string cache path"
+
     @pytest.mark.asyncio
-    async def test_scrape_and_cache_parameter_validation_before_not_implemented(self):
-        """Test that parameter validation happens before NotImplementedError is raised."""
+    async def test_scrape_and_cache_parameter_validation(self):
+        """Test that parameter validation works correctly."""
         ai_parser = AiParser(
             api_key="test_key",
             api_url="https://test.api.com",
@@ -187,17 +200,21 @@ class TestScrapeAndCacheMethodStructure:
             prompt="Test prompt",
             project_name="Test Project"
         )
-        
-        # Parameter validation errors should be raised instead of NotImplementedError
+
+        # Parameter validation errors should still be raised
         with pytest.raises((ValueError, TypeError)):
             await ai_parser.scrape_and_cache("")
-        
+
         with pytest.raises((ValueError, TypeError)):
             await ai_parser.scrape_and_cache(None)
-        
-        # Valid URL should raise NotImplementedError
-        with pytest.raises(NotImplementedError):
-            await ai_parser.scrape_and_cache("https://valid.url.com")
+
+        # Valid URL should not raise an error
+        ai_parser.browser = AsyncMock()  # Mock to prevent actual scraping
+        try:
+            result = await ai_parser.scrape_and_cache("https://valid.url.com")
+            assert isinstance(result, tuple), "Result should be a tuple"
+        except Exception as e:
+            pytest.fail(f"Valid URL should not raise an error: {e}")
     
     def test_scrape_and_cache_method_bound_to_instance(self):
         """Test that scrape_and_cache is properly bound to AiParser instances."""

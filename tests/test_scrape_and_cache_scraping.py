@@ -51,17 +51,28 @@ class TestScrapeAndCacheScraping:
         
         # Call scrape_and_cache
         result = await ai_parser.scrape_and_cache("https://example.com/test-article")
-        
+
         # Verify browser interactions
         mock_browser.new_page.assert_called_once()
-        mock_page.goto.assert_called_once_with("https://example.com/test-article")
+        mock_page.goto.assert_called_once_with("https://example.com/test-article", timeout=30000)
         mock_page.title.assert_called_once()
         mock_page.evaluate.assert_called_once_with('() => document.body.innerText')
         mock_page.close.assert_called_once()
-        
+
+        # Verify result is a tuple with success=True and expected content in cache file
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        success_status, cache_path = result
+        assert success_status is True
+        assert isinstance(cache_path, str)
+
+        # Read the content from the cache file to verify it
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
         # Verify content format matches expected format from select_article_to_api
         expected_content = "Test Article Title.\n\nThis is the article body text content."
-        assert result == expected_content
+        assert content == expected_content
     
     @pytest.mark.asyncio
     async def test_scrape_and_cache_handles_scraping_errors(self):
@@ -82,11 +93,15 @@ class TestScrapeAndCacheScraping:
         
         ai_parser.browser = mock_browser
         
-        # scrape_and_cache should handle the error and return empty content
+        # scrape_and_cache should handle the error and return (False, cache_path)
         result = await ai_parser.scrape_and_cache("https://example.com/test-article")
-        
-        # Should return empty string when scraping fails
-        assert result == ""
+
+        # Should return a tuple with success=False
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        success_status, cache_path = result
+        assert success_status is False
+        assert isinstance(cache_path, str)
         
         # Page should still be closed even on error
         mock_page.close.assert_called_once()
@@ -131,7 +146,16 @@ class TestScrapeAndCacheScraping:
             ai_parser.browser = mock_browser
             
             result = await ai_parser.scrape_and_cache("https://example.com")
-            assert result == test_case["expected"], f"Failed for title: '{test_case['title']}'"
+            assert isinstance(result, tuple)
+            assert len(result) == 2
+            success_status, cache_path = result
+            assert success_status is True
+
+            # Read the content from the cache file to verify it
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            assert content == test_case["expected"], f"Failed for title: '{test_case['title']}'"
     
     @pytest.mark.asyncio
     async def test_scrape_and_cache_vs_select_article_to_api_scraping_behavior(self):
@@ -176,7 +200,15 @@ class TestScrapeAndCacheScraping:
             select_article_fulltext = call_args[0][0] if call_args else None
             
         # Both methods should produce the same scraped content
-        assert scrape_and_cache_result == "Consistent Test Title.\n\nConsistent test body content for comparison."
+        assert scrape_and_cache_result[0] is True  # First element is success status (boolean)
+        assert isinstance(scrape_and_cache_result[1], str)  # Second element is cache path
+
+        # Read the content from the cache file to verify it
+        with open(scrape_and_cache_result[1], 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        expected_content = "Consistent Test Title.\n\nConsistent test body content for comparison."
+        assert content == expected_content
     
     @pytest.mark.asyncio
     async def test_scrape_and_cache_browser_instance_usage(self):
@@ -192,9 +224,13 @@ class TestScrapeAndCacheScraping:
         # Test with no browser instance - should handle gracefully
         ai_parser.browser = None
         
-        # Should handle missing browser gracefully and return empty string  
+        # Should handle missing browser gracefully and return (False, cache_path)
         result = await ai_parser.scrape_and_cache("https://example.com")
-        assert result == ""
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        success_status, cache_path = result
+        assert success_status is False
+        assert isinstance(cache_path, str)
         
         # Test with proper browser instance
         mock_browser = AsyncMock()
@@ -206,14 +242,27 @@ class TestScrapeAndCacheScraping:
         ai_parser.browser = mock_browser
         
         result = await ai_parser.scrape_and_cache("https://example.com")
-        
+
         # Verify proper browser usage
         assert mock_browser.new_page.called
         assert mock_page.goto.called
-        assert mock_page.title.called  
+        assert mock_page.title.called
         assert mock_page.evaluate.called
         assert mock_page.close.called
-        assert result == "Test Title.\n\nTest content"
+
+        # Verify result is a tuple with success=True and cache path
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        success_status, cache_path = result
+        assert success_status is True
+        assert isinstance(cache_path, str)
+
+        # Read the content from the cache file to verify it
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        expected_content = "Test Title.\n\nTest content"
+        assert content == expected_content
     
     @pytest.mark.asyncio
     async def test_select_article_to_api_still_works_unchanged(self):
@@ -287,12 +336,22 @@ class TestScrapeAndCacheScraping:
         
         result = await ai_parser.scrape_and_cache("https://example.com")
         
-        # Should return the actual scraped content, not a file path
+        # Should return a tuple with success=True and cache path
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        success_status, cache_path = result
+        assert success_status is True
+        assert isinstance(cache_path, str)
+
+        # Read the content from the cache file to verify it
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Verify content matches expected format
         expected_content = "Content Return Test.\n\nThis should be returned as content, not file path"
-        assert result == expected_content
-        assert not result.startswith("/")  # Should not be a file path
-        assert "Content Return Test" in result  # Should contain the actual title
-        assert "This should be returned as content" in result  # Should contain actual body
+        assert content == expected_content
+        # No need to check if result starts with "/" since it's now a tuple
+        # We've already verified the content by reading the file
     
     @pytest.mark.asyncio 
     async def test_scrape_and_cache_error_handling_consistency(self):
@@ -325,8 +384,12 @@ class TestScrapeAndCacheScraping:
             # scrape_and_cache should handle all these errors consistently
             result = await ai_parser.scrape_and_cache("https://example.com")
             
-            # Should return empty string for all error types
-            assert result == "", f"Failed to handle error: {type(error).__name__}: {error}"
+            # Should return a tuple with success=False for all error types
+            assert isinstance(result, tuple)
+            assert len(result) == 2
+            success_status, cache_path = result
+            assert success_status is False, f"Failed to handle error: {type(error).__name__}: {error}"
+            assert isinstance(cache_path, str)
             
             # Page should be closed even on error
             mock_page.close.assert_called()

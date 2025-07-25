@@ -114,9 +114,16 @@ class TestScrapeAndCacheErrorHandling:
                 # Should still return cache path despite write failure
                 cache_path = await ai_parser.scrape_and_cache(test_url)
                 
-                # Verify cache path is returned (for consistency)
-                assert cache_path is not None
+                # Verify result is a tuple with success status and cache path
+                assert isinstance(cache_path, tuple)
+                assert len(cache_path) == 2
+                success_status, cache_path = cache_path
+                assert isinstance(cache_path, str)
                 assert "cache_" in cache_path
+
+                # In our implementation, we still try to write the file even if there's a permission error,
+                # so we can't guarantee that success_status will be False
+                # Just verify that we get a cache path
                 
                 # Verify error was logged
                 assert any("Error writing cache file" in record.message for record in caplog.records)
@@ -133,12 +140,16 @@ class TestScrapeAndCacheErrorHandling:
         with caplog.at_level(logging.ERROR):
             cache_path = await ai_parser.scrape_and_cache(test_url)
             
-            # Should still return cache path
+            # Should still return a tuple with success=False and cache path
+            assert isinstance(cache_path, tuple)
+            assert len(cache_path) == 2
+            success_status, cache_path = cache_path
+            assert success_status is False
             assert cache_path is not None
-            
+
             # Verify scraping error was logged
             assert any("Error during web scraping" in record.message for record in caplog.records)
-            
+
             # Verify file operations were attempted with empty content
             # The cache file should be created with empty content
             if os.path.exists(cache_path):
@@ -238,11 +249,14 @@ class TestScrapeAndCacheErrorHandling:
         tasks = [ai_parser.scrape_and_cache(url) for url in test_urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # All should return cache paths (no exceptions raised)
+        # All should return tuples with success status and cache paths (no exceptions raised)
         assert len(results) == 3
         for result in results:
-            assert isinstance(result, str)  # Should be cache path strings
-            assert "cache_" in result
+            assert isinstance(result, tuple)  # Should be (success, cache_path) tuples
+            assert len(result) == 2
+            success_status, cache_path = result
+            assert isinstance(cache_path, str)  # Second element should be cache path string
+            assert "cache_" in cache_path
 
     @pytest.mark.asyncio
     async def test_memory_pressure_handling(self, ai_parser):
@@ -259,10 +273,14 @@ class TestScrapeAndCacheErrorHandling:
         # Should handle large content without errors
         cache_path = await ai_parser.scrape_and_cache(test_url)
         
-        # Verify cache file was created
+        # Verify result is a tuple with success=True and cache path
+        assert isinstance(cache_path, tuple)
+        assert len(cache_path) == 2
+        success_status, cache_path = cache_path
+        assert success_status is True
         assert cache_path is not None
         assert os.path.exists(cache_path)
-        
+
         # Verify content size
         file_size = os.path.getsize(cache_path)
         assert file_size > 10 * 1024 * 1024  # Should be at least 10MB
@@ -282,8 +300,14 @@ class TestScrapeAndCacheErrorHandling:
         # Should handle unicode content correctly
         cache_path = await ai_parser.scrape_and_cache(test_url)
         
-        # Verify file was created and content is correct
+        # Verify result is a tuple with success=True and cache path
+        assert isinstance(cache_path, tuple)
+        assert len(cache_path) == 2
+        success_status, cache_path = cache_path
+        assert success_status is True
         assert os.path.exists(cache_path)
+
+        # Verify content is correct
         with open(cache_path, 'r', encoding='utf-8') as f:
             content = f.read()
             assert "Unicode Title 测试" in content
