@@ -44,6 +44,8 @@ class AiParser:
                  model:str,
                  prompt:str,
                  project_name:str,
+                 user_agent_playwright= "Mozilla/5.0 (Windows NT 11.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
+                 timeout_playwright=10000,
                  publication_url=None,
                  pipeline_logger=None
                  ) -> None:
@@ -56,17 +58,18 @@ class AiParser:
             base_url=api_url
         )
         self.publication_url = publication_url
-        self.playwright = None
-        self.browser = None
         self.pipeline_logger = pipeline_logger
-        
         # Cache-related instance variables for storing cache file path and content
         self._cache_file_path: Optional[str] = None
         self._cached_content: Optional[str] = None
+        self.user_agent_playwright= user_agent_playwright
+        self.timeout_playwright=timeout_playwright
+        self.playwright = None 
+        self.browser = None 
 
     async def initialize(self):
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch()
+        self.browser = await self.playwright.firefox.launch()
 
     async def close(self):
         if self.browser:
@@ -278,8 +281,9 @@ class AiParser:
         if not self.publication_url:
             return []
         
-        page = await self.browser.new_page()
-        await page.goto(self.publication_url)
+        context = await self.browser.new_context(user_agent = self.user_agent_playwright)
+        page = await context.new_page()
+        await page.goto(self.publication_url, timeout= self.timeout_playwright)
         article_urls = await page.evaluate("""
             () => Array.from(document.querySelectorAll('a')).map(a => a.href)
                 .filter(href => href.includes('/article/') || href.includes('/news/'))
@@ -542,8 +546,9 @@ class AiParser:
         text_length = 0
         
         try:
-            page = await self.browser.new_page()
-            await page.goto(url)
+            context = await self.browser.new_context(user_agent = self.user_agent_playwright)
+            page = await context.new_page()
+            await page.goto(url, timeout= self.timeout_playwright)
             title = await page.title()
             text = await page.evaluate('() => document.body.innerText')
             await page.close()

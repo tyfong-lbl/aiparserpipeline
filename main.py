@@ -187,9 +187,8 @@ async def main():
     home_path = Path.home()
     excel_path = Path(home_path,"code/aiparserpipeline/diagnostics/Solar_Project_Tracker_ITexamples_2022_noPDFs_250521smalltest.xlsx")
     api_key = os.environ.get('CBORG_API_KEY')
-    api_url = "https://api.cborg.lbl.gov"
     model = 'lbl/llama' #lbl/cborg-chat:latest' # option list found here: https://cborg.lbl.gov/models/
-    #model = 'google/gemini-pro'
+    api_url = "https://api-local.cborg.lbl.gov"
     prompt_directory = Path(__file__).resolve().parent / 'test_prompts'
     output_dir = Path(__file__).resolve().parent / 'results'
     checkpoint_dir = Path(__file__).resolve().parent / 'checkpoints'
