@@ -165,7 +165,18 @@ cython_debug/
 
 # macos
 .DS_Store
+.swp
 
 # database files
 *.db
 *.csv
+/groundtruth
+/checkpoints
+
+# error logs
+error_*.txt
+*.log
+/diagnostics
+
+# scraped cache files
+scraped_cache/

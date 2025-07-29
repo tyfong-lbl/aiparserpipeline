@@ -1,0 +1,8 @@
+Analyze the text pasted below to determine if the solar projects called ${PROJECT} is mentioned in the text, and if so, the attributes of the ${PROJECT} project that is mentioned.  Based on your analysis, output a JSON dictionary, wherein the dictionary attributes are selected from the following list:  
+- technology_general: Type of generation technology, e.g. “thin-film             photovoltaic modules”
+- tech_module: Manufacturer and/or model and/or capacity in watts of the solar   panel modules, e.g., "First Solar, Series 6/6+, 450W"
+- module_count: Number of modules
+- tech_invert: Manufacturer and/or model and/or capacity of the inverters
+- invert_count: Number of inverters
+Output only the JSON dictionary according to these instructions. Do not output any other commentary or description. If there is not enough information available for an attribute, output null for that attribute.
+TEXT:
