@@ -165,11 +165,14 @@ class AiParser:
 
         try:
             logger.debug(f"Starting web scraping for URL: {url}")
-            page = await self.browser.new_page()
-
+            # page = await self.browser.new_page() #Julie commented out in favor of edited code from "get_api_response" (edited on playwright_param_tweaks branch) which appears to be a function no longer used
+            context = await self.browser.new_context(user_agent = self.user_agent_playwright)
+            page = await context.new_page()
+            
             # Navigate to page with error handling
             try:
-                await page.goto(url, timeout=30000)  # 30 second timeout
+                # await page.goto(url, timeout=30000)  # 30 second timeout #Julie commented out in favor of edited code from "get_api_response" (edited on playwright_param_tweaks branch) which appears to be a function no longer used
+                await page.goto(url, timeout= self.timeout_playwright)
                 logger.debug(f"Successfully navigated to URL: {url}")
             except Exception as nav_error:
                 logger.error(f"Navigation failed for URL {url}: {type(nav_error).__name__}: {nav_error}")
@@ -366,19 +369,19 @@ class AiParser:
                     # Store content in memory for subsequent calls
                     self._cached_content = fulltext
                     logger.debug(f"Loaded and cached content from {self._cache_file_path} ({len(fulltext)} chars)")
-                    if len(fulltext) < 20:
-                        llm_metrics = {
-                            'llm_response_status': False,
-                            'llm_response_error': f'Content too short ({len(fulltext)} characters)',
-                            'llm_processing_time': 0
-                        }
-                        return None, llm_metrics
                     
                 except FileNotFoundError:
                     raise FileNotFoundError(f"Cache file not found: {self._cache_file_path}")
                 except IOError as e:
                     raise IOError(f"Error reading cache file {self._cache_file_path}: {e}")
-        
+            if len(fulltext) < 20:
+                llm_metrics = {
+                    'llm_response_status': False,
+                    'llm_response_error': f'Content too short ({len(fulltext)} characters) did not send prompt',
+                    'llm_processing_time': 0
+                }
+                logger.warning("fulltext too short, returning out of get_api_response before requesting response")
+                return None, llm_metrics
         # Prepare prompt with template substitution
         values = {"PROJECT": self.project_name}
         template = Template(self.prompt)
@@ -546,6 +549,7 @@ class AiParser:
 
 
     async def select_article_to_api(self, url:str, include_url:bool=True, avg_pause=0):
+        # This function appears to no longer be called
         # Start timing for text extraction
         text_extraction_start_time = time.perf_counter()
         text_extraction_status = False
@@ -824,9 +828,6 @@ class ModelValidator:
         prompts = self.get_all_prompts()
         responses = []
         
-        # DIAGNOSTIC: Log prompt count
-        logger.info(f"DIAGNOSTIC: Processing {len(prompts)} prompts for URL {url} - PID: {process_id}")
-        
         ai_parser = AiParser(api_key=self.api_key,
                              api_url=self.api_url,
                              model=self.model,
@@ -881,6 +882,13 @@ class ModelValidator:
                 # Only consider this successful if we actually got meaningful content
                 if not scraping_successful:
                     logger.warning(f"DIAGNOSTIC: Scraping returned empty/whitespace content for {url} - PID: {process_id}")
+                    # Create dummy LLM metrics since no LLM processing occurred
+                    dummy_llm_metrics = {
+                        'llm_response_status': False,
+                        'llm_response_error': 'Text extraction deemed not successful - no LLM processing attempted',
+                        'llm_processing_time': 0
+                    }
+                    self._complete_logging_cycle_for_url(logging_context, dummy_llm_metrics)
                     return []
 
             except Exception as scraping_error:
@@ -915,7 +923,9 @@ class ModelValidator:
             successful_responses = 0
             total_llm_processing_time = 0
             last_llm_error = None
-            
+            # DIAGNOSTIC: Log prompt count
+            logger.info(f"DIAGNOSTIC: Processing {len(prompts)} prompts for URL {url} - PID: {process_id}")
+        
             for i, prompt in enumerate(prompts):
                 # DIAGNOSTIC: Log each prompt processing
                 logger.info(f"DIAGNOSTIC: Processing prompt {i+1}/{len(prompts)} for URL {url} - PID: {process_id}")
