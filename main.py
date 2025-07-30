@@ -168,7 +168,8 @@ async def main(excel_path):
     
     parser = argparse.ArgumentParser(description="Run multi-project validation")
     parser.add_argument('--keep-checkpoint', action='store_true', help='Keep the checkpoint file after completion')
-    args = parser.parse_args()
+    parser.add_argument('--excel_path')
+    args = parser.parse_args(['--excel_path', excel_path])
     
     # CRITICAL FIX: Acquire process lock BEFORE creating MultiProjectValidator
     logging.info(f"MAIN_CHECKPOINT_LOCK: About to acquire process lock - PID={pid}")
@@ -213,7 +214,7 @@ async def main(excel_path):
     max_concurrent_projects = 50  # Conservative limit for 62GB allocation
     
     multi_validator = MultiProjectValidator(
-        excel_path=excel_path,
+        excel_path=args.excel_path,
         api_key=api_key,
         api_url=api_url,
         model=model,
