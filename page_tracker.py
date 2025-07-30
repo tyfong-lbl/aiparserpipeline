@@ -45,7 +45,7 @@ class AiParser:
                  prompt:str,
                  project_name:str,
                  user_agent_playwright= "Mozilla/5.0 (Windows NT 11.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
-                 timeout_playwright=10000,
+                 timeout_playwright=30000,
                  publication_url=None,
                  pipeline_logger=None
                  ) -> None:
@@ -195,6 +195,7 @@ class AiParser:
                 else:
                     logger.warning(f"No meaningful content extracted from {url}. Fulltext length: {len(fulltext)} chars")
                     scraping_successful = False
+                    scraping_error = "No meaningful content extracted"
 
             except Exception as extract_error:
                 logger.error(f"Content extraction failed for URL {url}: {type(extract_error).__name__}: {extract_error}")
@@ -275,10 +276,10 @@ class AiParser:
         else:
             logger.error(f"Both scraping and cache writing failed for {url} -> {cache_file_path}")
 
-        # Return a tuple with success status and cache file path
+        # Return a tuple with success status, cache file path, and scraping error
         # This allows the calling code to properly handle cases where scraping failed
         # or returned empty content
-        return (scraping_successful, cache_file_path)
+        return (scraping_successful, cache_file_path, scraping_error)
       
     async def get_articles_urls(self) -> list:
         if not self.publication_url:
@@ -853,16 +854,17 @@ class ModelValidator:
             
             # Step 2: Scrape and cache the URL content once
             try:
-                # scrape_and_cache now returns a tuple (scraping_successful, cache_path)
+                # scrape_and_cache now returns a tuple (scraping_successful, cache_path, scraping_error)
                 scraping_result = await ai_parser.scrape_and_cache(url)
                 scraping_successful = scraping_result[0]
                 cache_path = scraping_result[1]
+                scraping_error = scraping_result[2]
 
                 logger.info(f"DIAGNOSTIC: Scraped {url} -> {cache_path} - Success: {scraping_successful} - PID: {process_id}")
 
                 # Set text extraction status based on actual scraping success
                 text_extraction_status = scraping_successful
-                text_extraction_error = None if scraping_successful else "No meaningful content extracted"
+                text_extraction_error = None if scraping_successful else scraping_error #"No meaningful content extracted"
 
                 # Get text length from cached content
                 try:
