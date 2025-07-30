@@ -366,6 +366,13 @@ class AiParser:
                     # Store content in memory for subsequent calls
                     self._cached_content = fulltext
                     logger.debug(f"Loaded and cached content from {self._cache_file_path} ({len(fulltext)} chars)")
+                    if len(fulltext) < 20:
+                        llm_metrics = {
+                            'llm_response_status': False,
+                            'llm_response_error': f'Content too short ({len(fulltext)} characters)',
+                            'llm_processing_time': 0
+                        }
+                        return None, llm_metrics
                     
                 except FileNotFoundError:
                     raise FileNotFoundError(f"Cache file not found: {self._cache_file_path}")
