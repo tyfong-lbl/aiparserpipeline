@@ -148,7 +148,7 @@ def release_process_lock(lock_file):
         except Exception as e:
             logging.error(f"PROCESS_LOCK: Error releasing lock: {e}")
 
-async def main():
+async def main(excel_path):
     # DIAGNOSTIC: Add process and environment logging for HPC debugging
     import socket
     import time
@@ -184,9 +184,9 @@ async def main():
     print("test message")
     #excel_path = "G:\\Shared drives\\USS\\Automation\\Solar_Project_Tracker_ITexamples_2022_noPDFs.xlsx"
     #excel_path = "/Users/TYFong/Desktop/worklogs/project_logs/ai_parser/25_sample_columns.xlsx"
-    home_path = Path.home()
+    # home_path = Path.home()
     # excel_path = Path(home_path,"code/aiparserpipeline/diagnostics/Solar_Project_Tracker_ITexamples_2022_noPDFs_250521smalltest.xlsx")
-    excel_path = "urls_test_for_fixing_empty_llm_calls.xlsx"
+    # excel_path = "urls_test_for_fixing_empty_llm_calls.xlsx"
     api_key = os.environ.get('CBORG_API_KEY')
     model = 'lbl/llama' #lbl/cborg-chat:latest' # option list found here: https://cborg.lbl.gov/models/
     api_url = "https://api-local.cborg.lbl.gov"
@@ -255,7 +255,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        exit_code = asyncio.run(main())
+        exit_code = asyncio.run(main(sys.argv[1]))
         sys.exit(exit_code)
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}")
