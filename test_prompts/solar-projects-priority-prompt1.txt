@@ -1,7 +1,8 @@
 Analyze the text pasted below to determine if the solar projects called ${PROJECT} is mentioned in the text, and if so, the attributes of the ${PROJECT} project that are mentioned.  Based on your analysis, output a JSON dictionary, wherein the dictionary attributes are selected from the following list:  
 - owner: The name of the company or organization that owns the project
 - offtaker: Name of the company or utility purchasing power from the project, for example, through a power purchase agreement. A power purchase agreement is often abbreviated as PPA. There may be multiple offtakers
-- storage_power: Power capacity of energy storage in MW
-- storage_energy: Energy capacity of energy storage in MWh
-Output only the JSON dictionary according to these instructions. Do not output any other commentary or description.
+- storage_power: Power capacity of energy storage (e.g., battery) in MW
+- storage_energy: Energy capacity of energy storage (e.g., battery) in MWh
+- community: Community solar refers to local solar facilities shared by multiple community subscribers who receive credit on their electricity bills for their share of the power produced. According to the text, is this project considered "community solar"? If yes, output Y. If no, output N.
+Output only the JSON dictionary according to these instructions. Do not output any other commentary or description. If there is not enough information available for an attribute, output null for that attribute.
 TEXT:

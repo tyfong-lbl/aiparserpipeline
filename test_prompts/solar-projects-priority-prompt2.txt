@@ -2,6 +2,7 @@ Analyze the text pasted below to determine if the solar projects called ${PROJEC
 - location: Location of the project, including as available, city, county, state and country
 - developer: Name of the company or organization that initially developed the project
 - offtake_desc: A concise summary of how the energy generated from the project will be sold
+- cost_desc: A concise summary of all costs associated with the project (e.g., capital cost, construction cost, financing amount)
 - epc: Name of the company that handled the project engineering, procurement, and construction 
-Output only the JSON dictionary according to these instructions. Do not output any other commentary or description.
+Output only the JSON dictionary according to these instructions. Do not output any other commentary or description. If there is not enough information available for an attribute, output null for that attribute.
 TEXT:
